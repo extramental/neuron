@@ -1,4 +1,5 @@
 diff-match-patch
 tornado
-git+https://github.com/mrjoes/sockjs-tornado.git
 redis
+git+https://github.com/mrjoes/sockjs-tornado.git
+git+https://github.com/Operational-Transformation/ot.py.git

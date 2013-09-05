@@ -8,7 +8,8 @@ from tornado.options import define, options
 
 from sockjs.tornado import SockJSRouter, SockJSConnection
 
-from .ot import ServerDocument, text, RedisTextDocumentBackend, MemoryBackend
+from .optrans import Server as OTServer
+from .optrans import RedisTextDocumentBackend, serialize_op, deserialize_op
 
 define("debug", default=False, help="run in debug mode")
 define("port", default=8080, help="port to run on")
@@ -53,7 +54,7 @@ class Connection(SockJSConnection):
 
     def do_load(self, doc_id):
         if doc_id not in self.docs:
-            self.docs[doc_id] = ServerDocument(RedisTextDocumentBackend(self.application.redis, doc_id))
+            self.docs[doc_id] = OTServer(RedisTextDocumentBackend(self.application.redis, doc_id))
         doc = self.docs[doc_id]
 
         self.doc_ids.add(doc_id)
@@ -66,7 +67,7 @@ class Connection(SockJSConnection):
 
     def do_operation(self, doc_id, rev, raw_op):
         doc = self.docs[doc_id]
-        op = doc.receive_operation(self.uid, rev, text.deserialize_op(raw_op))
+        op = doc.receive_operation(self.uid, rev, deserialize_op(raw_op))
 
         if op is None:
             return
@@ -80,12 +81,10 @@ class Connection(SockJSConnection):
             if uid == self.uid:
                 continue
 
-            payload = [self.OP_OPERATION, doc_id, text.serialize_op(op)]
+            payload = [self.OP_OPERATION, doc_id, serialize_op(op)]
             conn = self.application.uid_conns[uid]
 
             conn.send(json.dumps(payload))
-
-        #doc.reify_minimal()
 
     def on_close(self):
         if self.uid is None:

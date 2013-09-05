@@ -8,8 +8,7 @@
         <script src="bower_components/google-diff-match-patch-js/diff_match_patch.js"></script>
         <script src="bower_components/sockjs-client/sockjs.min.js"></script>
         <script src="bower_components/lodash/lodash.js"></script>
-        <script src="ot/index.js"></script>
-        <script src="ot/text.js"></script>
+        <script src="bower_components/ot/dist/ot.js"></script>
         <script>
             var doc = document.getElementById("document");
             var uid = Math.floor(Math.random() * 100);
@@ -22,15 +21,48 @@
                 ACK: 4
             };
 
+            var dmp = new diff_match_patch();
+
+            function serializeOp(o) {
+                return JSON.stringify(o.ops);
+            }
+
+            function deserializeOp(v) {
+                return ot.TextOperation.fromJSON(JSON.parse(v));
+            }
+
+            function makeTextOperation(orig, new_) {
+                var diff = dmp.diff_main(orig, new_);
+                dmp.diff_cleanupSemantic(diff);
+
+                var o = new ot.TextOperation();
+
+                diff.forEach(function (x) {
+                    switch (x[0]) {
+                        case 0:
+                            o.retain(x[1].length);
+                            break;
+                        case 1:
+                            o.insert(x[1]);
+                            break;
+                        case -1:
+                            o['delete'](x[1].length);
+                            break;
+                    }
+                });
+
+                return o;
+            }
+
             var OP_MAP = {};
             OP_MAP[ops.AUTH] = function () {
                 sock.send(JSON.stringify([ops.LOAD, "test_doc"]));
 
                 OP_MAP[ops.CONTENT] = function (id, rev, body) {
-                    var cdoc = new ot.ClientDocument(rev + 1);
+                    var cdoc = new ot.Client(rev + 1);
 
                     cdoc.sendOperation = function (rev, op) {
-                        sock.send(JSON.stringify([ops.OPERATION, id, rev, ot.text.serializeOp(op)]));
+                        sock.send(JSON.stringify([ops.OPERATION, id, rev, serializeOp(op)]));
                     };
 
                     cdoc.applyOperation = function(op) {
@@ -49,7 +81,7 @@
                             return;
                         }
 
-                        var op = ot.text.makeTextOperations(oldContent, newContent).forward;
+                        var op = makeTextOperation(oldContent, newContent);
                         oldContent = newContent;
 
                         cdoc.applyClient(op);
@@ -60,7 +92,7 @@
                     };
 
                     OP_MAP[ops.OPERATION] = function (id, rawOp) {
-                        cdoc.applyServer(ot.text.deserializeOp(rawOp));
+                        cdoc.applyServer(deserializeOp(rawOp));
                     };
                 };
             };

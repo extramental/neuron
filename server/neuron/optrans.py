@@ -1,5 +1,93 @@
 import time
-from . import text
+import json
+
+from ot import text_operation
+from ot.server import MemoryBackend as _MemoryBackend
+from ot.server import Server as _Server
+
+from diff_match_patch import diff_match_patch
+
+dmp = diff_match_patch()
+
+class Server(_Server):
+    def __init__(self, backend):
+        self.backend = backend
+
+    @property
+    def document(self):
+        # override self.document to delegate to the backend
+        _, document = self.backend.get_latest()
+        return document
+
+    @document.setter
+    def document(self, v):
+        # override the setter to do nothing (kind of really disgusting)
+        return
+
+class MemoryBackend(_MemoryBackend):
+    def __init__(self, latest="", operations=[]):
+        self.latest = latest
+        super(MemoryBackend, self).__init__(operations)
+
+    def add_client(self, user_id, min_rev=-1):
+        self.last_operation[user_id] = min_rev
+
+    def remove_client(self, user_id):
+        del self.last_operation[user_id]
+
+    def get_clients(self):
+        return self.last_operation.keys()
+
+    def save_operation(self, user_id, operation):
+        """Save an operation in the database."""
+        self.latest = operation(self.latest)
+        super(MemoryBackend, self).save_operation(user_id, operation)
+
+    def get_latest(self):
+        return len(self.operations), self.latest
+
+
+def make_text_operation(orig, new):
+    """
+    Generate a pair of text operations from an original and new text. The first
+    value is the forward operation to get from the original text to the new
+    text, and the second is the undo operation that maps from the new text to
+    the original text.
+    """
+    diff = dmp.diff_main(orig, new)
+    dmp.diff_cleanupSemantic(diff)
+
+    o = text_operation.TextOperation()
+
+    for c, text in diff:
+        if c == 0:
+            o.retain(len(text))
+        elif c == 1:
+            o.insert(text)
+        elif c == -1:
+            o.delete(len(text))
+
+    return o
+
+
+def serialize_op(o):
+    """
+    Serialize a text operation to a string.
+    """
+    return json.dumps(o.ops)
+
+
+def deserialize_op(v):
+    """
+    Deserialize a text operation from a string.
+    """
+    ops = json.loads(v)
+    for i, v in enumerate(ops):
+        if isinstance(v, unicode):
+            ops[i] = ops[i].encode("utf-8")
+
+    return text_operation.TextOperation(ops)
+
 
 class RedisTextDocumentBackend(object):
     def __init__(self, redis, doc_id):
@@ -32,7 +120,7 @@ class RedisTextDocumentBackend(object):
         rev += 1
 
         self.redis.rpush(self.doc_id + ":pending",
-                         self._serialize_op(user_id, rev, int(time.time()), operation))
+                         self._serialize_wrapped_op(user_id, rev, int(time.time()), operation))
 
         self.add_client(user_id, rev)
         #self._reify_minimal()
@@ -48,13 +136,13 @@ class RedisTextDocumentBackend(object):
         return int(self.redis.hget(self.doc_id + ":user_ids", user_id))
 
     @staticmethod
-    def _deserialize_op(x):
+    def _deserialize_wrapped_op(x):
         user_id, rev, ts, op = x.split(":", 3)
-        return int(user_id), int(rev), int(ts), text.deserialize_op(op)
+        return int(user_id), int(rev), int(ts), deserialize_op(op)
 
     @staticmethod
-    def _serialize_op(user_id, rev, ts, op):
-        return "{}:{}:{}:{}".format(user_id, rev, ts, text.serialize_op(op))
+    def _serialize_wrapped_op(user_id, rev, ts, op):
+        return "{}:{}:{}:{}".format(user_id, rev, ts, serialize_op(op))
 
     @staticmethod
     def _parse_minimal(raw_minimal):
@@ -82,7 +170,7 @@ class RedisTextDocumentBackend(object):
             raw_minimal = self.NEW_DOCUMENT
             self.redis.set(self.doc_id + ":minimal", raw_minimal)
 
-        return self._parse_minimal(raw_minimal), [self._deserialize_op(raw_op)
+        return self._parse_minimal(raw_minimal), [self._deserialize_wrapped_op(raw_op)
                                                   for raw_op in raw_pending]
 
     def _get_minimal(self):
@@ -100,7 +188,7 @@ class RedisTextDocumentBackend(object):
         """
         Get the list of pending operations for the document.
         """
-        return [self._deserialize_op(raw_op)
+        return [self._deserialize_wrapped_op(raw_op)
                 for raw_op
                 in self.redis.lrange(self.doc_id + ":pending", 0, -1)]
 
@@ -145,7 +233,7 @@ class RedisTextDocumentBackend(object):
             for pending_rev, pending_ts, pending_user_id, pending_op in pending[:n]:
                 undo_op = pending_op.invert(content)
                 p.rpush(self.doc_id + ":history",
-                        self._serialize_op(pending_rev, pending_ts, pending_user_id, undo_op))
+                        self._serialize_wrapped_op(pending_rev, pending_ts, pending_user_id, undo_op))
                 content = pending_op(content)
 
             # get rid of the pending operations we've committed into history
@@ -160,66 +248,3 @@ class RedisTextDocumentBackend(object):
             p.execute()
 
         return new_min_rev
-
-
-class MemoryBackend(object):
-    """Simple backend that saves all operations in the server's memory. This
-    causes the processe's heap to grow indefinitely.
-    """
-
-    def __init__(self, latest="", operations=[]):
-        self.latest = latest
-        self.operations = operations[:]
-        self.last_operation = {}
-
-    def add_client(self, user_id, min_rev=-1):
-        self.last_operation[user_id] = min_rev
-
-    def remove_client(self, user_id):
-        del self.last_operation[user_id]
-
-    def get_clients(self):
-        return self.last_operation.keys()
-
-    def save_operation(self, user_id, operation):
-        """Save an operation in the database."""
-        self.latest = operation(self.latest)
-        self.last_operation[user_id] = len(self.operations)
-        self.operations.append(operation)
-
-    def get_operations(self, start, end=None):
-        """Return operations in a given range."""
-        return self.operations[start:end]
-
-    def get_last_revision_from_user(self, user_id):
-        """Return the revision number of the last operation from a given user."""
-        return self.last_operation.get(user_id, None)
-
-    def get_latest(self):
-        return len(self.operations), self.latest
-
-
-class ServerDocument(object):
-    """Receives operations from clients, transforms them against all
-    concurrent operations and sends them back to all clients.
-    """
-
-    def __init__(self, backend):
-        self.backend = backend
-
-    def receive_operation(self, user_id, revision, operation):
-        """Transforms an operation coming from a client against all concurrent
-        operation, applies it to the current document and returns the operation
-        to send to the clients.
-        """
-
-        last_by_user = self.backend.get_last_revision_from_user(user_id)
-        if last_by_user >= revision:
-            return
-
-        concurrent_operations = self.backend.get_operations(revision)
-        for concurrent_operation in concurrent_operations:
-            operation, _ = operation.transform(operation, concurrent_operation)
-
-        self.backend.save_operation(user_id, operation)
-        return operation
