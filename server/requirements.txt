@@ -1,4 +1,4 @@
 diff-match-patch
 tornado
-sockjs-tornado
+git+https://github.com/mrjoes/sockjs-tornado.git
 redis

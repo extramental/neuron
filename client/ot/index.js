@@ -83,10 +83,10 @@ if (typeof ot === "undefined") { var ot = {}; }
         },
 
         applyServer: function (client, op) {
-            var pair = op.constructor.transform(this.outstanding, op);
-            var pair2 = op.constructor.transform(this.buffer, pair[1]);
+            var pair1 = op.constructor.transform(this.outstanding, op);
+            var pair2 = op.constructor.transform(this.buffer, pair1[1]);
             client.applyOperation(pair2[1]);
-            return new ClientDocument.AwaitingWithBuffer(pair[0], pair2[0]);
+            return new ClientDocument.AwaitingWithBuffer(pair1[0], pair2[0]);
         },
 
         serverAck: function (client) {

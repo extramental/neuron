@@ -50,7 +50,7 @@
                         }
 
                         var op = ot.text.makeTextOperations(oldContent, newContent).forward;
-                        oldContent = doc.value;
+                        oldContent = newContent;
 
                         cdoc.applyClient(op);
                     }, 300, {trailing: true});
