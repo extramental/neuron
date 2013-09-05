@@ -150,8 +150,8 @@ class RedisTextDocumentBackend(object):
 
             # get rid of the pending operations we've committed into history
             for _ in range(n + 1):
-                # i would use ltrim, but all pending ops might actually be
-                # removed
+                # i would use ltrim, but all pending ops might actually need to
+                # be removed -- ltrim retains at least one operation
                 p.lpop(self.doc_id + ":pending")
 
             # commit a new minimal revision
