@@ -8,11 +8,11 @@
         <script src="bower_components/google-diff-match-patch-js/diff_match_patch.js"></script>
         <script src="bower_components/sockjs-client/sockjs.min.js"></script>
         <script src="bower_components/lodash/lodash.js"></script>
+        <script src="ot/index.js"></script>
         <script src="ot/text.js"></script>
         <script>
             var doc = document.getElementById("document");
             var uid = Math.floor(Math.random() * 100);
-            var rev;
 
             var ops = {
                 AUTH: 0,
@@ -26,10 +26,19 @@
             OP_MAP[ops.AUTH] = function () {
                 sock.send(JSON.stringify([ops.LOAD, "test_doc"]));
 
-                OP_MAP[ops.CONTENT] = function (id, rev_, body) {
-                    doc.disabled = false;
+                OP_MAP[ops.CONTENT] = function (id, rev, body) {
+                    var cdoc = new ot.ClientDocument(rev + 1);
 
-                    rev = rev_;
+                    cdoc.sendOperation = function (rev, op) {
+                        sock.send(JSON.stringify([ops.OPERATION, id, rev, ot.text.serializeOp(op)]));
+                    };
+
+                    cdoc.applyOperation = function(op) {
+                        doc.value = op.apply(doc.value);
+                        oldContent = doc.value;
+                    }
+
+                    doc.disabled = false;
 
                     var oldContent = doc.value = body || "";
 
@@ -40,23 +49,18 @@
                             return;
                         }
 
-                        var op = ot.makeTextOperations(oldContent, newContent).forward;
+                        var op = ot.text.makeTextOperations(oldContent, newContent).forward;
                         oldContent = doc.value;
-                        console.log("committing on revision", rev);
-                        sock.send(JSON.stringify([ops.OPERATION, id, rev++, ot.serializeOp(op)]));
+
+                        cdoc.applyClient(op);
                     }, 300, {trailing: true});
 
-                    OP_MAP[ops.ACK] = function (id, rev_) {
-
+                    OP_MAP[ops.ACK] = function (id) {
+                        cdoc.serverAck();
                     };
 
-                    OP_MAP[ops.OPERATION] = function (id, rev_, rawOp) {
-                        var op = ot.deserializeOp(rawOp);
-                        console.log(op.ops);
-                        doc.value = op.apply(doc.value);
-                        oldContent = doc.value;
-                        rev = rev_;
-                        sock.send(JSON.stringify([ops.ACK, id, rev]));
+                    OP_MAP[ops.OPERATION] = function (id, rawOp) {
+                        cdoc.applyServer(ot.text.deserializeOp(rawOp));
                     };
                 };
             };

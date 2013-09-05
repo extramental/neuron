@@ -1,7 +1,7 @@
 // Code adapted from https://github.com/Operational-Transformation/ot.js/
 // Licensed under the terms of the MIT license.
 
-var ot;
+if (typeof ot === "undefined") { var ot = {}; }
 
 (function () {
     // requires: diff_match_patch;
@@ -604,7 +604,7 @@ var ot;
         };
     }
 
-    ot = {
+    ot.text = {
         TextOperation:      TextOperation,
         serializeOp:        serializeOp,
         deserializeOp:      deserializeOp,
