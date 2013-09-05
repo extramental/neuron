@@ -1,6 +1,7 @@
-# Code originally from ot.py.
-# https://raw.github.com/Operational-Transformation/ot.py/master/ot/text_operation.py
+# Code heavily based on ot.py
+# https://github.com/Operational-Transformation/ot.py
 
+import json
 
 # Operations are lists of ops. There are three types of ops:
 #
@@ -273,6 +274,20 @@ class TextOperation(object):
             (a, b) = _shorten_ops(a, b)
 
         return (a_prime, b_prime)
+
+    def serialize(self):
+        """
+        Serialize a text operation to a string.
+        """
+        return json.dumps(self.ops)
+
+
+    @classmethod
+    def deserialize(cls, v):
+        """
+        Deserialize a text operation from a string.
+        """
+        return cls(json.loads(v))
 
 
 class IncompatibleOperationError(Exception):

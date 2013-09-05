@@ -1,38 +1,36 @@
+# Code heavily based on ot.py
+# https://github.com/Operational-Transformation/ot.py
+
 import time
-import json
 
 from . import text_operation
-from ot.server import Server as _Server
 
+class Server(object):
+    """Receives operations from clients, transforms them against all
+    concurrent operations and sends them back to all clients.
+    """
 
-class Server(_Server):
     def __init__(self, backend):
         self.backend = backend
 
-    @property
-    def document(self):
-        # override self.document to delegate to the backend
-        _, document = self.backend.get_latest()
-        return document
+    def receive_operation(self, user_id, revision, operation):
+        """Transforms an operation coming from a client against all concurrent
+        operation, applies it to the current document and returns the operation
+        to send to the clients.
+        """
 
-    @document.setter
-    def document(self, v):
-        # override the setter to do nothing (kind of really disgusting)
-        return
+        last_by_user = self.backend.get_last_revision_from_user(user_id)
+        if last_by_user and last_by_user >= revision:
+            return
 
+        Operation = operation.__class__
 
-def serialize_op(o):
-    """
-    Serialize a text operation to a string.
-    """
-    return json.dumps(o.ops)
+        concurrent_operations = self.backend.get_operations(revision)
+        for concurrent_operation in concurrent_operations:
+            (operation, _) = Operation.transform(operation, concurrent_operation)
 
-
-def deserialize_op(v):
-    """
-    Deserialize a text operation from a string.
-    """
-    return text_operation.TextOperation(json.loads(v))
+        self.backend.save_operation(user_id, operation)
+        return operation
 
 
 class RedisTextDocumentBackend(object):
@@ -103,12 +101,12 @@ class RedisTextDocumentBackend(object):
 
     @staticmethod
     def _deserialize_wrapped_op(x):
-        user_id, rev, ts, op = x.split(":", 3)
-        return int(user_id), int(rev), int(ts), deserialize_op(op)
+        user_id, rev, ts, op = x.decode("utf-8").split(":", 3)
+        return int(user_id), int(rev), int(ts), text_operation.TextOperation.deserialize(op)
 
     @staticmethod
     def _serialize_wrapped_op(user_id, rev, ts, op):
-        return "{}:{}:{}:{}".format(user_id, rev, ts, serialize_op(op))
+        return "{}:{}:{}:{}".format(user_id, rev, ts, op.serialize())
 
     @staticmethod
     def _parse_minimal(raw_minimal):
@@ -120,7 +118,7 @@ class RedisTextDocumentBackend(object):
         """
         Make a minimal revision for use with Redis.
         """
-        return "{}:{}:{}:{}".format(user_id, rev, ts, content)
+        return "{}:{}:{}:{}".format(user_id, rev, ts, content.encode("utf-8"))
 
     NEW_DOCUMENT = _format_minimal.__func__(0, 0, 0, "")
 
@@ -136,8 +134,8 @@ class RedisTextDocumentBackend(object):
             raw_minimal = self.NEW_DOCUMENT
             self.redis.set(self.doc_id + ":minimal", raw_minimal)
 
-        return self._parse_minimal(raw_minimal), [self._deserialize_wrapped_op(raw_op)
-                                                  for raw_op in raw_pending]
+        return self._parse_minimal(raw_minimal.decode("utf-8")), [self._deserialize_wrapped_op(raw_op)
+                                                                  for raw_op in raw_pending]
 
     def _get_minimal(self):
         """
@@ -148,7 +146,7 @@ class RedisTextDocumentBackend(object):
         if raw_minimal is None:
             raw_minimal = self.NEW_DOCUMENT
             self.redis.set(self.doc_id + ":minimal", raw_minimal)
-        return self._parse_minimal(raw_minimal)
+        return self._parse_minimal(raw_minimal.decode("utf-8"))
 
     def _get_pending(self):
         """

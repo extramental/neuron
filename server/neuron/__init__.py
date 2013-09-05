@@ -8,8 +8,9 @@ from tornado.options import define, options
 
 from sockjs.tornado import SockJSRouter, SockJSConnection
 
-from .optrans import Server as OTServer
-from .optrans import RedisTextDocumentBackend, serialize_op, deserialize_op
+from .ot import Server as OTServer
+from .ot import RedisTextDocumentBackend
+from .ot.text_operation import TextOperation
 
 define("debug", default=False, help="run in debug mode")
 define("port", default=8080, help="port to run on")
@@ -70,14 +71,14 @@ class Connection(SockJSConnection):
 
     def do_operation(self, doc_id, rev, raw_op):
         doc = self.docs[doc_id]
-        op = doc.receive_operation(self.uid, rev, deserialize_op(raw_op))
+        op = doc.receive_operation(self.uid, rev, TextOperation.deserialize(raw_op))
 
         if op is None:
             return
 
         self.send(json.dumps([self.OP_ACK, doc_id]))
 
-        payload = [self.OP_OPERATION, doc_id, serialize_op(op)]
+        payload = [self.OP_OPERATION, doc_id, op.serialize()]
 
         for uid in doc.backend.get_clients():
             if uid not in self.application.uid_conns:
