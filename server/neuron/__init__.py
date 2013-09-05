@@ -67,17 +67,21 @@ class ConcurrentDocument(object):
         """
         return [int(x) for x in self.redis.hkeys(self.id + ":uids")]
 
+    @staticmethod
+    def parse_minimal(raw_minimal):
+        rev, ts, uid, content = raw_minimal.split(":", 3)
+        return int(rev), int(ts), int(uid), content
+
     def get_minimal(self):
         """
         Get the minimal revision of the document. By "minimal", it means the
         revision that the slowest client is at.
         """
-        minimal = self.redis.get(self.id + ":minimal")
-        if minimal is None:
-            minimal = self.NEW_DOCUMENT
-            self.redis.set(self.id + ":minimal", minimal)
-        rev, ts, uid, content = minimal.split(":", 3)
-        return int(rev), int(ts), int(uid), content
+        raw_minimal = self.redis.get(self.id + ":minimal")
+        if raw_minimal is None:
+            raw_minimal = self.NEW_DOCUMENT
+            self.redis.set(self.id + ":minimal", raw_minimal)
+        return self.parse_minimal(raw_minimal)
 
     def get_last_uids(self):
         """
@@ -95,13 +99,26 @@ class ConcurrentDocument(object):
                 for raw_op
                 in self.redis.lrange(self.id + ":pending", 0, -1)]
 
+    def get_minimal_and_pending(self):
+        """
+        Get both the minimal text and pending operations, atomically.
+        """
+        p = self.redis.pipeline()
+        p.get(self.id + ":minimal")
+        p.lrange(self.id + ":pending", 0, -1)
+        raw_minimal, raw_pending = p.execute()
+
+        return self.parse_minimal(raw_minimal), [self.deserialize_op(raw_op)
+                                                 for raw_op in raw_pending]
+
     def get_latest(self):
         """
         Get the latest revision of the document.
         """
-        rev, ts, uid, content = self.get_minimal()
+        minimal, pending = self.get_minimal_and_pending()
 
-        for rev, ts, uid, op in self.get_pending():
+        rev, ts, uid, content = minimal
+        for rev, ts, uid, op in pending:
             content = op(content)
 
         return rev, ts, uid, content
@@ -111,7 +128,9 @@ class ConcurrentDocument(object):
         Get a revision that can be constructed from operations in the pending
         list.
         """
-        r, ts, uid, content = self.get_minimal()
+        minimal, pending = self.get_minimal_and_pending()
+
+        r, ts, uid, content = minimal
 
         # if the minimal revision is the pending revision, then we don't have
         # to apply any pending operations
