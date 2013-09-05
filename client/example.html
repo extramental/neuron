@@ -5,7 +5,6 @@
     </head>
     <body>
         <textarea id="document" cols="30" rows="10"></textarea>
-        <script src="bower_components/google-diff-match-patch-js/diff_match_patch.js"></script>
         <script src="bower_components/sockjs-client/sockjs.min.js"></script>
         <script src="bower_components/lodash/lodash.js"></script>
         <script src="bower_components/ot/dist/ot.js"></script>
@@ -13,22 +12,22 @@
         <link rel="stylesheet" href="bower_components/codemirror/lib/codemirror.css">
         <script>
             var doc = document.getElementById("document");
-            var uid = Math.floor(Math.random() * 100);
+            var uid = Math.floor(Math.random() * 100000);
 
             var cm = CodeMirror.fromTextArea(doc, {
                 lineNumbers: true
             });
-            var cma = new ot.CodeMirrorAdapter(cm);
+            var client;
 
             var ops = {
                 AUTH: 0,
                 LOAD: 1,
                 CONTENT: 2,
                 OPERATION: 3,
-                ACK: 4
+                ACK: 4,
+                CURSOR: 5,
+                LEFT: 6
             };
-
-            var dmp = new diff_match_patch();
 
             function serializeOp(o) {
                 return JSON.stringify(o.ops);
@@ -38,58 +37,65 @@
                 return ot.TextOperation.fromJSON(JSON.parse(v));
             }
 
-            function makeTextOperation(orig, new_) {
-                var diff = dmp.diff_main(orig, new_);
-                dmp.diff_cleanupSemantic(diff);
-
-                var o = new ot.TextOperation();
-
-                diff.forEach(function (x) {
-                    switch (x[0]) {
-                        case 0:
-                            o.retain(x[1].length);
-                            break;
-                        case 1:
-                            o.insert(x[1]);
-                            break;
-                        case -1:
-                            o['delete'](x[1].length);
-                            break;
-                    }
-                });
-
-                return o;
-            }
-
             var OP_MAP = {};
             OP_MAP[ops.AUTH] = function () {
                 sock.send(JSON.stringify([ops.LOAD, "test_doc"]));
 
-                OP_MAP[ops.CONTENT] = function (id, rev, body) {
-                    var cdoc = new ot.Client(rev + 1);
+                OP_MAP[ops.CONTENT] = function (id, rev, clients, body) {
                     cm.setValue(body);
 
-                    cdoc.sendOperation = function (rev, op) {
-                        sock.send(JSON.stringify([ops.OPERATION, id, rev, serializeOp(op)]));
-                    };
+                    var sockAdapter = {
+                        sendOperation: function (rev, op, cursor) {
+                            sock.send(JSON.stringify([ops.OPERATION, id, rev, JSON.stringify(op)]));
+                            sockAdapter.sendCursor(cursor);
+                        },
 
-                    cdoc.applyOperation = function(op) {
-                        cma.applyOperation(op);
-                    }
+                        sendCursor: function (cursor) {
+                            if (cursor) {
+                                sock.send(JSON.stringify([ops.CURSOR, id, cursor.position + "," + cursor.selectionEnd]));
+                            } else {
+                                sock.send(JSON.stringify([ops.CURSOR, id, null]));
+                            }
+                        },
 
-                    cma.registerCallbacks({
-                        change: function (c) {
-                            cdoc.applyClient(c);
+                        registerCallbacks: function (cb) {
+                            OP_MAP[ops.OPERATION] = function (id, rawOp) {
+                                cb.operation(JSON.parse(rawOp));
+                            };
+
+                            OP_MAP[ops.ACK] = function (id) {
+                                cb.ack();
+                            };
+
+                            OP_MAP[ops.CURSOR] = function (id, uid, cursor) {
+                                if (cursor !== null) {
+                                    cursor = cursor.split(",");
+                                    cursor = {
+                                        position: parseInt(cursor[0], 10),
+                                        selectionEnd: parseInt(cursor[1], 10)
+                                    };
+                                }
+                                cb.cursor(uid, cursor);
+                            };
+
+
+                            OP_MAP[ops.LEFT] = function (id, uid) {
+                                cb.client_left(uid);
+                            };
+
+                            this.cb = cb;
                         }
-                    });
-
-                    OP_MAP[ops.ACK] = function (id) {
-                        cdoc.serverAck();
                     };
 
-                    OP_MAP[ops.OPERATION] = function (id, rawOp) {
-                        cdoc.applyServer(deserializeOp(rawOp));
-                    };
+                    client = new ot.EditorClient(
+                        rev + 1,
+                        clients.reduce(function (acc, x) {
+                            acc[x] = {name: x};
+                            return acc;
+                        }, {}),
+                        sockAdapter,
+                        new ot.CodeMirrorAdapter(cm)
+                    );
                 };
             };
 

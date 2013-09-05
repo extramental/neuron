@@ -98,7 +98,7 @@ class RedisTextDocumentBackend(object):
         """
         Add or update a client in the client hash.
         """
-        self.redis.hset(self.doc_id + ":user_ids", user_id, min_rev)
+        self.redis.hset(self.doc_id + ":user_ids", user_id, str(min_rev))
 
     def remove_client(self, user_id):
         """
@@ -111,6 +111,26 @@ class RedisTextDocumentBackend(object):
         Get the list of clients.
         """
         return [int(x) for x in self.redis.hkeys(self.doc_id + ":user_ids")]
+
+    def get_client_cursor(self, user_id):
+        c = self.redis.hget(self.doc_id + ":cursors", user_id).split(":")
+        if not c:
+            return None
+        pos, end = c.split(",")
+        return int(pos), int(end)
+
+    def add_client_cursor(self, user_id, pos, end):
+        self.redis.hset(self.doc_id + ":cursors", user_id, "{},{}".format(pos, end))
+
+    def remove_client_cursor(self, user_id):
+        self.redis.hdel(self.doc_id + ":cursors", user_id)
+
+    def get_client_cursors(self):
+        acc = {}
+        for k, c in self.redis.hgetall(self.doc_id + ":cursors"):
+            pos, end = c.split(",")
+            acc[int(k)] = (int(pos), int(end))
+        return acc
 
     def save_operation(self, user_id, operation):
         """Save an operation in the database."""
@@ -219,8 +239,6 @@ class RedisTextDocumentBackend(object):
         # check if we can flush some pending operations
         _, min_rev, _, content = self._get_minimal()
         new_min_rev = min(self._get_last_user_ids().values())
-
-        print(self._get_last_user_ids())
 
         if new_min_rev > min_rev:
             # yes we can! we want to commit a few pending operations into

@@ -24,11 +24,14 @@ class Connection(SockJSConnection):
     OP_CONTENT = 2
     OP_OPERATION = 3
     OP_ACK = 4
+    OP_CURSOR = 5
+    OP_LEFT = 6
 
     OP_MAP = {
         OP_AUTH: "do_auth",
         OP_LOAD: "do_load",
-        OP_OPERATION: "do_operation"
+        OP_OPERATION: "do_operation",
+        OP_CURSOR: "do_cursor"
     }
 
     docs = {}
@@ -63,7 +66,7 @@ class Connection(SockJSConnection):
         rev, content = doc.backend.get_latest()
         doc.backend.add_client(self.uid, rev)
 
-        self.send(json.dumps([self.OP_CONTENT, doc_id, rev, content]))
+        self.send(json.dumps([self.OP_CONTENT, doc_id, rev, doc.backend.get_clients(), content]))
 
     def do_operation(self, doc_id, rev, raw_op):
         doc = self.docs[doc_id]
@@ -74,6 +77,8 @@ class Connection(SockJSConnection):
 
         self.send(json.dumps([self.OP_ACK, doc_id]))
 
+        payload = [self.OP_OPERATION, doc_id, serialize_op(op)]
+
         for uid in doc.backend.get_clients():
             if uid not in self.application.uid_conns:
                 doc.backend.remove_client(uid)
@@ -81,17 +86,51 @@ class Connection(SockJSConnection):
             if uid == self.uid:
                 continue
 
-            payload = [self.OP_OPERATION, doc_id, serialize_op(op)]
             conn = self.application.uid_conns[uid]
+            conn.send(json.dumps(payload))
 
+    def do_cursor(self, doc_id, cursor):
+        doc = self.docs[doc_id]
+
+        if cursor is None:
+            doc.backend.remove_client_cursor(self.uid)
+        else:
+            pos, end = cursor.split(",")
+            doc.backend.add_client_cursor(self.uid, int(pos), int(end))
+
+        payload = [self.OP_CURSOR, doc_id, self.uid, cursor]
+
+        for uid in doc.backend.get_clients():
+            if uid not in self.application.uid_conns:
+                doc.backend.remove_client(uid)
+                continue
+            if uid == self.uid:
+                continue
+
+            conn = self.application.uid_conns[uid]
             conn.send(json.dumps(payload))
 
     def on_close(self):
-        if self.uid is None:
-            return
+        try:
+            if self.uid is None:
+                return
 
-        for doc_id in self.doc_ids:
-            self.docs[doc_id].remove_client(self.uid)
+            for doc_id in self.doc_ids:
+                payload = [self.OP_LEFT, doc_id, self.uid]
+                doc = self.docs[doc_id]
+
+                self.docs[doc_id].backend.remove_client(self.uid)
+                for uid in doc.backend.get_clients():
+                    if uid not in self.application.uid_conns:
+                        doc.backend.remove_client(uid)
+                        continue
+                    if uid == self.uid:
+                        continue
+
+                    conn = self.application.uid_conns[uid]
+                    conn.send(json.dumps(payload))
+        except Exception as e:
+            logging.error("Error during on_close:", exc_info=True)
 
 
 class Application(tornado.web.Application):
