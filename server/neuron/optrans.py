@@ -1,13 +1,9 @@
 import time
 import json
 
-from ot import text_operation
-from ot.server import MemoryBackend as _MemoryBackend
+from . import text_operation
 from ot.server import Server as _Server
 
-from diff_match_patch import diff_match_patch
-
-dmp = diff_match_patch()
 
 class Server(_Server):
     def __init__(self, backend):
@@ -24,51 +20,6 @@ class Server(_Server):
         # override the setter to do nothing (kind of really disgusting)
         return
 
-class MemoryBackend(_MemoryBackend):
-    def __init__(self, latest="", operations=[]):
-        self.latest = latest
-        super(MemoryBackend, self).__init__(operations)
-
-    def add_client(self, user_id, min_rev=-1):
-        self.last_operation[user_id] = min_rev
-
-    def remove_client(self, user_id):
-        del self.last_operation[user_id]
-
-    def get_clients(self):
-        return self.last_operation.keys()
-
-    def save_operation(self, user_id, operation):
-        """Save an operation in the database."""
-        self.latest = operation(self.latest)
-        super(MemoryBackend, self).save_operation(user_id, operation)
-
-    def get_latest(self):
-        return len(self.operations), self.latest
-
-
-def make_text_operation(orig, new):
-    """
-    Generate a pair of text operations from an original and new text. The first
-    value is the forward operation to get from the original text to the new
-    text, and the second is the undo operation that maps from the new text to
-    the original text.
-    """
-    diff = dmp.diff_main(orig, new)
-    dmp.diff_cleanupSemantic(diff)
-
-    o = text_operation.TextOperation()
-
-    for c, text in diff:
-        if c == 0:
-            o.retain(len(text))
-        elif c == 1:
-            o.insert(text)
-        elif c == -1:
-            o.delete(len(text))
-
-    return o
-
 
 def serialize_op(o):
     """
@@ -81,12 +32,7 @@ def deserialize_op(v):
     """
     Deserialize a text operation from a string.
     """
-    ops = json.loads(v)
-    for i, v in enumerate(ops):
-        if isinstance(v, unicode):
-            ops[i] = ops[i].encode("utf-8")
-
-    return text_operation.TextOperation(ops)
+    return text_operation.TextOperation(json.loads(v))
 
 
 class RedisTextDocumentBackend(object):
