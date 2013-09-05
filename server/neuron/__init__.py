@@ -47,13 +47,13 @@ class ConcurrentDocument(object):
         """
         return "{}:{}:{}:{}".format(rev, ts, uid, content)
 
+    NEW_DOCUMENT = make_minimal_rev.__func__(0, 0, -1, "")
+
     def add_client(self, uid, min_rev=0):
         """
         Add or update a client in the client hash.
         """
-        print("ADDING CLIENT", self.id + ":uids", uid, min_rev)
         self.redis.hset(self.id + ":uids", uid, min_rev)
-        print("CLIENTS", self.redis.hgetall(self.id + ":uids"))
 
     def remove_client(self, uid):
         """
@@ -74,7 +74,7 @@ class ConcurrentDocument(object):
         """
         minimal = self.redis.get(self.id + ":minimal")
         if minimal is None:
-            minimal = "0:0:-1:"
+            minimal = self.NEW_DOCUMENT
             self.redis.set(self.id + ":minimal", minimal)
         rev, ts, uid, content = minimal.split(":", 3)
         return int(rev), int(ts), int(uid), content
@@ -181,12 +181,10 @@ class ConcurrentDocument(object):
             if crev <= rev:
                 continue
             op, _ = text.TextOperation.transform(op, cop)
-            print("DOING SOME OT LOL")
 
             r += 1
         rev = r
 
-        print("FINALLY", op.ops)
 
         # push our operation onto the pending queue
         self.redis.rpush(self.id + ":pending",
@@ -257,8 +255,6 @@ class Connection(SockJSConnection):
             payload = [self.OP_OPERATION, doc_id, rev + 1, text.serialize_op(op)]
             conn = self.application.uid_conns[uid]
 
-            # TODO: fix rev
-            print("DOING OPERATION", rev)
             conn.send(json.dumps(payload))
 
         doc.reify_minimal()
@@ -266,7 +262,6 @@ class Connection(SockJSConnection):
         self.send(json.dumps([self.OP_ACK, doc_id, rev]))
 
     def do_ack(self, doc_id, rev):
-        print("ACK", doc_id, rev)
         doc = ConcurrentDocument(self.application.redis, doc_id)
         doc.add_client(self.uid, rev)
 
