@@ -1,0 +1,79 @@
+<!doctype html>
+<html>
+    <head>
+        <title>Concurrent Editing</title>
+    </head>
+    <body>
+        <textarea id="document" cols="30" rows="10" disabled></textarea>
+        <script src="bower_components/google-diff-match-patch-js/diff_match_patch.js"></script>
+        <script src="bower_components/sockjs-client/sockjs.min.js"></script>
+        <script src="bower_components/lodash/lodash.js"></script>
+        <script src="ot/text.js"></script>
+        <script>
+            var doc = document.getElementById("document");
+            var uid = Math.floor(Math.random() * 100);
+            var rev;
+
+            var ops = {
+                AUTH: 0,
+                LOAD: 1,
+                CONTENT: 2,
+                OPERATION: 3,
+                ACK: 4
+            };
+
+            var OP_MAP = {};
+            OP_MAP[ops.AUTH] = function () {
+                sock.send(JSON.stringify([ops.LOAD, "test_doc"]));
+
+                OP_MAP[ops.CONTENT] = function (id, rev_, body) {
+                    doc.disabled = false;
+
+                    rev = rev_;
+
+                    var oldContent = doc.value = body || "";
+
+                    doc.onkeydown = doc.onkeyup = _.throttle(function () {
+                        var newContent = doc.value;
+
+                        if (oldContent === newContent) {
+                            return;
+                        }
+
+                        var op = ot.makeTextOperations(oldContent, newContent).forward;
+                        oldContent = doc.value;
+                        console.log("committing on revision", rev);
+                        sock.send(JSON.stringify([ops.OPERATION, id, rev++, ot.serializeOp(op)]));
+                    }, 300, {trailing: true});
+
+                    OP_MAP[ops.ACK] = function (id, rev_) {
+
+                    };
+
+                    OP_MAP[ops.OPERATION] = function (id, rev_, rawOp) {
+                        var op = ot.deserializeOp(rawOp);
+                        console.log(op.ops);
+                        doc.value = op.apply(doc.value);
+                        oldContent = doc.value;
+                        rev = rev_;
+                        sock.send(JSON.stringify([ops.ACK, id, rev]));
+                    };
+                };
+            };
+
+            var sock = new SockJS("http://localhost:8080/");
+            sock.onopen = function () {
+                sock.send(JSON.stringify([ops.AUTH, uid]));
+            };
+
+            sock.onmessage = function (e) {
+                var payload = JSON.parse(e.data);
+                OP_MAP[payload[0]].apply(null, payload.slice(1));
+            };
+
+            sock.onclose = function () {
+                doc.disabled = true;
+            };
+        </script>
+    </body>
+</html>
