@@ -4,14 +4,21 @@
         <title>Concurrent Editing</title>
     </head>
     <body>
-        <textarea id="document" cols="30" rows="10" disabled></textarea>
+        <textarea id="document" cols="30" rows="10"></textarea>
         <script src="bower_components/google-diff-match-patch-js/diff_match_patch.js"></script>
         <script src="bower_components/sockjs-client/sockjs.min.js"></script>
         <script src="bower_components/lodash/lodash.js"></script>
         <script src="bower_components/ot/dist/ot.js"></script>
+        <script src="bower_components/codemirror/lib/codemirror.js"></script>
+        <link rel="stylesheet" href="bower_components/codemirror/lib/codemirror.css">
         <script>
             var doc = document.getElementById("document");
             var uid = Math.floor(Math.random() * 100);
+
+            var cm = CodeMirror.fromTextArea(doc, {
+                lineNumbers: true
+            });
+            var cma = new ot.CodeMirrorAdapter(cm);
 
             var ops = {
                 AUTH: 0,
@@ -60,32 +67,21 @@
 
                 OP_MAP[ops.CONTENT] = function (id, rev, body) {
                     var cdoc = new ot.Client(rev + 1);
+                    cm.setValue(body);
 
                     cdoc.sendOperation = function (rev, op) {
                         sock.send(JSON.stringify([ops.OPERATION, id, rev, serializeOp(op)]));
                     };
 
                     cdoc.applyOperation = function(op) {
-                        doc.value = op.apply(doc.value);
-                        oldContent = doc.value;
+                        cma.applyOperation(op);
                     }
 
-                    doc.disabled = false;
-
-                    var oldContent = doc.value = body || "";
-
-                    doc.onkeydown = doc.onkeyup = _.throttle(function () {
-                        var newContent = doc.value;
-
-                        if (oldContent === newContent) {
-                            return;
+                    cma.registerCallbacks({
+                        change: function (c) {
+                            cdoc.applyClient(c);
                         }
-
-                        var op = makeTextOperation(oldContent, newContent);
-                        oldContent = newContent;
-
-                        cdoc.applyClient(op);
-                    }, 300, {trailing: true});
+                    });
 
                     OP_MAP[ops.ACK] = function (id) {
                         cdoc.serverAck();
@@ -108,7 +104,7 @@
             };
 
             sock.onclose = function () {
-                doc.disabled = true;
+                console.error("died");
             };
         </script>
     </body>

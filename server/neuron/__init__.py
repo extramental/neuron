@@ -9,7 +9,7 @@ from tornado.options import define, options
 from sockjs.tornado import SockJSRouter, SockJSConnection
 
 from .optrans import Server as OTServer
-from .optrans import RedisTextDocumentBackend, serialize_op, deserialize_op
+from .optrans import RedisTextDocumentBackend, MemoryBackend, serialize_op, deserialize_op
 
 define("debug", default=False, help="run in debug mode")
 define("port", default=8080, help="port to run on")
