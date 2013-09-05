@@ -107,6 +107,10 @@ class ConcurrentDocument(object):
         return rev, ts, uid, content
 
     def get_pending_revision(self, rev):
+        """
+        Get a revision that can be constructed from operations in the pending
+        list.
+        """
         r, ts, uid, content = self.get_minimal()
 
         # if the minimal revision is the pending revision, then we don't have
@@ -127,7 +131,7 @@ class ConcurrentDocument(object):
 
     def reify_minimal(self):
         """
-        Reify at many pending operations as possible into the minimal text.
+        Reify as many pending operations as possible into the minimal text.
         """
         # check if we can flush some pending operations
         min_rev, _, _, content = self.get_minimal()
@@ -162,7 +166,9 @@ class ConcurrentDocument(object):
 
     def run_operation(self, rev, ts, uid, op):
         """
-        Run an operation on the document.
+        Run an operation on the document. Please note that rev specifies the
+        revision to run the operation at, not the revision the operation
+        creates.
         """
         _, _, _, content = self.get_pending_revision(rev)
 
@@ -175,7 +181,6 @@ class ConcurrentDocument(object):
         if last_by_user > rev:
             return
 
-        # TODO: possibly broken
         r = rev
         for crev, _, _, cop in self.get_pending():
             if crev <= rev:
@@ -184,7 +189,6 @@ class ConcurrentDocument(object):
 
             r += 1
         rev = r
-
 
         # push our operation onto the pending queue
         self.redis.rpush(self.id + ":pending",
