@@ -123,7 +123,7 @@ class RedisTextDocumentBackend(object):
                          self._serialize_wrapped_op(user_id, rev, int(time.time()), operation))
 
         self.add_client(user_id, rev)
-        #self._reify_minimal()
+        self._reify_minimal()
 
     def get_operations(self, start, end=None):
         """Return operations in a given range."""
@@ -220,6 +220,8 @@ class RedisTextDocumentBackend(object):
         _, min_rev, _, content = self._get_minimal()
         new_min_rev = min(self._get_last_user_ids().values())
 
+        print(self._get_last_user_ids())
+
         if new_min_rev > min_rev:
             # yes we can! we want to commit a few pending operations into
             # history now.
@@ -236,8 +238,8 @@ class RedisTextDocumentBackend(object):
                         self._serialize_wrapped_op(pending_rev, pending_ts, pending_user_id, undo_op))
                 content = pending_op(content)
 
-            # get rid of the pending operations we've committed into history
-            for _ in range(n + 1):
+            # get rid of the pending operations and commit them into history
+            for _ in range(n):
                 # i would use ltrim, but all pending ops might actually need to
                 # be removed -- ltrim retains at least one operation
                 p.lpop(self.doc_id + ":pending")
