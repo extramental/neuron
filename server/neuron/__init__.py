@@ -68,7 +68,6 @@ class Connection(SockJSConnection):
 
         doc.backend.add_client(self.user_id, self.name)
         rev, content = doc.backend.get_latest()
-        doc.backend.add_client(self.user_id, rev)
 
         self.send(json.dumps([self.OP_CONTENT, doc_id, rev,
                               {k.decode("utf-8"): {"name": self.application.conns[k].name}
