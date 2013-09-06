@@ -41,10 +41,6 @@ class RedisTextDocumentBackend(object):
         self.doc_id = doc_id
         self.name = name
 
-        # TODO: the rest of this
-        self.cursors = {}
-        self.last_user_revs = {}
-
     def add_client(self, user_id, min_rev=-1):
         """
         Add or update a client in the client hash.
