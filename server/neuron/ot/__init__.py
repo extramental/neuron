@@ -189,6 +189,7 @@ class RedisTextDocumentBackend(object):
         new_min_rev = luids and min(luids.values()) or None
 
         if new_min_rev > min_rev:
+            start_time = time.time()
             pending = self._get_pending()
 
             # yes we can! we want to commit a few pending operations into
@@ -197,9 +198,6 @@ class RedisTextDocumentBackend(object):
                 n = len(pending)
             else:
                 n = new_min_rev - min_rev
-
-            if n > 1:
-                logging.info("%s needs reification for %d revision(s)", self.doc_id, n)
 
             p = self.redis.pipeline()
 
@@ -220,3 +218,6 @@ class RedisTextDocumentBackend(object):
             p.set(self.doc_id + ":minimal",
                   self._format_minimal(pending_name, pending_rev, pending_ts, content))
             p.execute()
+
+            if n > 1:
+                logging.info("%s reified for %d revision(s) in %.fms", self.doc_id, n, (time.time() - start_time) * 1000)
