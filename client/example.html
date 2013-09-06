@@ -26,7 +26,8 @@
                 OPERATION: 3,
                 ACK: 4,
                 CURSOR: 5,
-                LEFT: 6
+                LEFT: 6,
+                JOIN: 7
             };
 
             function serializeOp(o) {
@@ -83,16 +84,17 @@
                                 cb.client_left(uid);
                             };
 
+                            OP_MAP[ops.JOIN] = function (id, uid, name) {
+                                cb.set_name(uid, name);
+                            };
+
                             this.cb = cb;
                         }
                     };
 
                     client = new ot.EditorClient(
                         rev + 1,
-                        clients.reduce(function (acc, x) {
-                            acc[x] = {name: x};
-                            return acc;
-                        }, {}),
+                        clients,
                         sockAdapter,
                         new ot.CodeMirrorAdapter(cm)
                     );

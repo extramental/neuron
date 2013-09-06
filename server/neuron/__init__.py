@@ -28,6 +28,7 @@ class Connection(SockJSConnection):
     OP_ACK = 4
     OP_CURSOR = 5
     OP_LEFT = 6
+    OP_JOIN = 7
 
     OP_MAP = {
         OP_AUTH: "do_auth",
@@ -43,7 +44,7 @@ class Connection(SockJSConnection):
         self.user_id = None
 
     def get_document(self, doc_id):
-        return OTServer(RedisTextDocumentBackend(self.application.redis, doc_id, self.editor_id))
+        return OTServer(RedisTextDocumentBackend(self.application.redis, doc_id, self.name))
 
     @property
     def application(self):
@@ -54,9 +55,9 @@ class Connection(SockJSConnection):
         opcode, rest = payload[0], payload[1:]
         getattr(self, self.OP_MAP[opcode])(*rest)
 
-    def do_auth(self, editor_id):
+    def do_auth(self, name):
         self.user_id = uuid.uuid4().hex
-        self.editor_id = editor_id
+        self.name = name
         self.application.conns[self.user_id] = self
         self.send(json.dumps([self.OP_AUTH]))
 
@@ -65,11 +66,16 @@ class Connection(SockJSConnection):
 
         self.doc_ids.add(doc_id)
 
-        doc.backend.add_client(self.user_id)
+        doc.backend.add_client(self.user_id, self.name)
         rev, content = doc.backend.get_latest()
-        doc.backend.add_client(self.user_id, rev)
+        doc.backend.update_client_min_rev(self.user_id, rev)
 
-        self.send(json.dumps([self.OP_CONTENT, doc_id, rev, doc.backend.get_clients(), content]))
+        self.send(json.dumps([self.OP_CONTENT, doc_id, rev,
+                              {k: {"name": v} for k, v in doc.backend.get_clients().iteritems() if k != self.user_id},
+                              content]))
+
+        self.broadcast_to_doc(doc_id,
+                              [self.OP_JOIN, doc_id, self.user_id, self.name])
 
     def do_operation(self, doc_id, rev, raw_op):
         doc = self.get_document(doc_id)
