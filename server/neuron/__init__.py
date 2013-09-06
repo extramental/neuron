@@ -1,6 +1,7 @@
 import logging
 import redis
 import json
+import uuid
 
 import tornado.ioloop
 import tornado.web
@@ -54,7 +55,7 @@ class Connection(SockJSConnection):
         getattr(self, self.OP_MAP[opcode])(*rest)
 
     def do_auth(self, editor_id):
-        self.user_id = self.application.conns and max(self.application.conns.keys()) + 1 or 0
+        self.user_id = uuid.uuid4().hex
         self.editor_id = editor_id
         self.application.conns[self.user_id] = self
         self.send(json.dumps([self.OP_AUTH]))

@@ -55,7 +55,7 @@ class RedisTextDocumentBackend(object):
         """
         Get the list of clients.
         """
-        return [int(x) for x in self.redis.hkeys(self.doc_id + ":user_ids")]
+        return self.redis.hkeys(self.doc_id + ":user_ids")
 
     def get_client_cursor(self, user_id):
         c = self.redis.hget(self.doc_id + ":cursors", user_id).split(":")
@@ -173,7 +173,7 @@ class RedisTextDocumentBackend(object):
         """
         Get the list of last revisions a given UID touched.
         """
-        return {int(k): int(v)
+        return {k: int(v)
                 for k, v
                 in self.redis.hgetall(self.doc_id + ":user_ids").iteritems()}
 
