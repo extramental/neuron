@@ -50,6 +50,7 @@ class RedisTextDocumentBackend(object):
         Remove a client from the client hash.
         """
         self.redis.hdel(self.doc_id + ":user_ids", user_id)
+        self._reify_minimal()
 
     def get_clients(self):
         """
@@ -183,9 +184,10 @@ class RedisTextDocumentBackend(object):
         """
         # check if we can flush some pending operations
         _, min_rev, _, content = self._get_minimal()
-        new_min_rev = min(self._get_last_user_ids().values())
+        luids = self._get_last_user_ids()
+        new_min_rev = luids and min(luids.values()) or None
 
-        if new_min_rev > min_rev:
+        if new_min_rev is None or new_min_rev > min_rev:
             # yes we can! we want to commit a few pending operations into
             # history now.
             n = new_min_rev - min_rev
