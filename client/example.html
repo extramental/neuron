@@ -12,7 +12,7 @@
         <link rel="stylesheet" href="bower_components/codemirror/lib/codemirror.css">
         <script>
             var doc = document.getElementById("document");
-            var editorId = 1;
+            var editorId = "1";
 
             var cm = CodeMirror.fromTextArea(doc, {
                 lineNumbers: true
@@ -98,6 +98,7 @@
                         sockAdapter,
                         new ot.CodeMirrorAdapter(cm)
                     );
+                    document.body.appendChild(client.clientListEl);
                 };
             };
 
