@@ -39,7 +39,7 @@ class Connection(SockJSConnection):
     def __init__(self, *args, **kwargs):
         super(Connection, self).__init__(*args, **kwargs)
         self.doc_ids = set([])
-        self.uid = None
+        self.user_id = None
 
     def get_document(self, doc_id):
         return OTServer(RedisTextDocumentBackend(self.application.redis, doc_id, self.editor_id))
@@ -54,9 +54,9 @@ class Connection(SockJSConnection):
         getattr(self, self.OP_MAP[opcode])(*rest)
 
     def do_auth(self, editor_id):
-        self.uid = self.application.uid_conns and max(self.application.uid_conns.keys()) + 1 or 0
+        self.user_id = self.application.conns and max(self.application.conns.keys()) + 1 or 0
         self.editor_id = editor_id
-        self.application.uid_conns[self.uid] = self
+        self.application.conns[self.user_id] = self
         self.send(json.dumps([self.OP_AUTH]))
 
     def do_load(self, doc_id):
@@ -64,15 +64,15 @@ class Connection(SockJSConnection):
 
         self.doc_ids.add(doc_id)
 
-        doc.backend.add_client(self.uid)
+        doc.backend.add_client(self.user_id)
         rev, content = doc.backend.get_latest()
-        doc.backend.add_client(self.uid, rev)
+        doc.backend.add_client(self.user_id, rev)
 
         self.send(json.dumps([self.OP_CONTENT, doc_id, rev, doc.backend.get_clients(), content]))
 
     def do_operation(self, doc_id, rev, raw_op):
         doc = self.get_document(doc_id)
-        op = doc.receive_operation(self.uid, rev, TextOperation.deserialize(raw_op))
+        op = doc.receive_operation(self.user_id, rev, TextOperation.deserialize(raw_op))
 
         if op is None:
             return
@@ -86,44 +86,44 @@ class Connection(SockJSConnection):
         doc = self.get_document(doc_id)
 
         if cursor is None:
-            doc.backend.remove_client_cursor(self.uid)
+            doc.backend.remove_client_cursor(self.user_id)
         else:
             pos, end = cursor.split(",")
-            doc.backend.add_client_cursor(self.uid, int(pos), int(end))
+            doc.backend.add_client_cursor(self.user_id, int(pos), int(end))
 
         self.broadcast_to_doc(doc_id,
-                              [self.OP_CURSOR, doc_id, self.uid, cursor])
+                              [self.OP_CURSOR, doc_id, self.user_id, cursor])
 
     def do_left(self, doc_id):
         self.doc_ids.remove(doc_id)
-        self.get_document(doc_id).backend.remove_client(self.uid)
+        self.get_document(doc_id).backend.remove_client(self.user_id)
         self.broadcast_to_doc(doc_id,
-                              [self.OP_LEFT, doc_id, self.uid])
+                              [self.OP_LEFT, doc_id, self.user_id])
 
     def broadcast_to_doc(self, doc_id, payload):
         doc = self.get_document(doc_id)
 
-        for uid in doc.backend.get_clients():
-            if uid not in self.application.uid_conns:
-                doc.backend.remove_client(uid)
+        for user_id in doc.backend.get_clients():
+            if user_id not in self.application.conns:
+                doc.backend.remove_client(user_id)
                 continue
-            if uid == self.uid:
+            if user_id == self.user_id:
                 continue
-            self.application.uid_conns[uid].send(json.dumps(payload))
+            self.application.conns[user_id].send(json.dumps(payload))
 
     def on_close(self):
         try:
-            if self.uid is None:
+            if self.user_id is None:
                 return
 
             for doc_id in self.doc_ids:
-                payload = [self.OP_LEFT, doc_id, self.uid]
+                payload = [self.OP_LEFT, doc_id, self.user_id]
                 doc = self.get_document(doc_id)
 
-                self.get_document(doc_id).backend.remove_client(self.uid)
+                self.get_document(doc_id).backend.remove_client(self.user_id)
 
                 self.broadcast_to_doc(doc_id,
-                                      [self.OP_LEFT, doc_id, self.uid])
+                                      [self.OP_LEFT, doc_id, self.user_id])
         except Exception as e:
             logging.error("Error during on_close:", exc_info=True)
 
@@ -132,7 +132,7 @@ class Application(tornado.web.Application):
     def __init__(self, *args, **kwargs):
         tornado.web.Application.__init__(self, *args, **kwargs)
         self.redis = self.settings["redis"]
-        self.uid_conns = {}
+        self.conns = {}
 
 
 def make_application():
