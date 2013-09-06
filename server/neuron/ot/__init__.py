@@ -34,9 +34,10 @@ class Server(object):
 
 
 class RedisTextDocumentBackend(object):
-    def __init__(self, redis, doc_id):
+    def __init__(self, redis, doc_id, editor_id):
         self.redis = redis
         self.doc_id = doc_id
+        self.editor_id = editor_id
 
     def add_client(self, user_id, min_rev=-1):
         """
@@ -84,7 +85,7 @@ class RedisTextDocumentBackend(object):
         rev += 1
 
         self.redis.rpush(self.doc_id + ":pending",
-                         self._serialize_wrapped_op(user_id, rev, int(time.time()), operation))
+                         self._serialize_wrapped_op(self.editor_id, rev, int(time.time()), operation))
 
         self.add_client(user_id, rev)
         self._reify_minimal()
@@ -101,24 +102,24 @@ class RedisTextDocumentBackend(object):
 
     @staticmethod
     def _deserialize_wrapped_op(x):
-        user_id, rev, ts, op = x.decode("utf-8").split(":", 3)
-        return int(user_id), int(rev), int(ts), text_operation.TextOperation.deserialize(op)
+        editor_id, rev, ts, op = x.decode("utf-8").split(":", 3)
+        return editor_id, int(rev), int(ts), text_operation.TextOperation.deserialize(op)
 
     @staticmethod
-    def _serialize_wrapped_op(user_id, rev, ts, op):
-        return "{}:{}:{}:{}".format(user_id, rev, ts, op.serialize())
+    def _serialize_wrapped_op(editor_id, rev, ts, op):
+        return "{}:{}:{}:{}".format(editor_id, rev, ts, op.serialize())
 
     @staticmethod
     def _parse_minimal(raw_minimal):
-        user_id, rev, ts, content = raw_minimal.split(":", 3)
-        return int(user_id), int(rev), int(ts), content
+        editor_id, rev, ts, content = raw_minimal.split(":", 3)
+        return editor_id, int(rev), int(ts), content
 
     @staticmethod
-    def _format_minimal(user_id, rev, ts, content):
+    def _format_minimal(editor_id, rev, ts, content):
         """
         Make a minimal revision for use with Redis.
         """
-        return "{}:{}:{}:{}".format(user_id, rev, ts, content.encode("utf-8"))
+        return "{}:{}:{}:{}".format(editor_id, rev, ts, content.encode("utf-8"))
 
     NEW_DOCUMENT = _format_minimal.__func__(0, 0, 0, "")
 
@@ -194,10 +195,10 @@ class RedisTextDocumentBackend(object):
             p = self.redis.pipeline()
 
             # generate historical undo operations
-            for pending_rev, pending_ts, pending_user_id, pending_op in pending[:n]:
+            for pending_editor_id, pending_rev, pending_ts, pending_op in pending[:n]:
                 undo_op = pending_op.invert(content)
                 p.rpush(self.doc_id + ":history",
-                        self._serialize_wrapped_op(pending_rev, pending_ts, pending_user_id, undo_op))
+                        self._serialize_wrapped_op(pending_editor_id, pending_rev, pending_ts, undo_op))
                 content = pending_op(content)
 
             # get rid of the pending operations and commit them into history
@@ -208,7 +209,7 @@ class RedisTextDocumentBackend(object):
 
             # commit a new minimal revision
             p.set(self.doc_id + ":minimal",
-                  self._format_minimal(pending_rev, pending_ts, pending_user_id, content))
+                  self._format_minimal(pending_editor_id, pending_rev, pending_ts, content))
             p.execute()
 
         return new_min_rev

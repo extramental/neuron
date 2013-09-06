@@ -12,7 +12,7 @@
         <link rel="stylesheet" href="bower_components/codemirror/lib/codemirror.css">
         <script>
             var doc = document.getElementById("document");
-            var uid = Math.floor(Math.random() * 100000);
+            var editorId = 1;
 
             var cm = CodeMirror.fromTextArea(doc, {
                 lineNumbers: true
@@ -101,7 +101,7 @@
 
             var sock = new SockJS("http://localhost:8080/");
             sock.onopen = function () {
-                sock.send(JSON.stringify([ops.AUTH, uid]));
+                sock.send(JSON.stringify([ops.AUTH, editorId]));
             };
 
             sock.onmessage = function (e) {

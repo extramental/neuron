@@ -32,15 +32,17 @@ class Connection(SockJSConnection):
         OP_AUTH: "do_auth",
         OP_LOAD: "do_load",
         OP_OPERATION: "do_operation",
-        OP_CURSOR: "do_cursor"
+        OP_CURSOR: "do_cursor",
+        OP_LEFT: "do_left"
     }
-
-    docs = {}
 
     def __init__(self, *args, **kwargs):
         super(Connection, self).__init__(*args, **kwargs)
         self.doc_ids = set([])
         self.uid = None
+
+    def get_document(self, doc_id):
+        return OTServer(RedisTextDocumentBackend(self.application.redis, doc_id, self.editor_id))
 
     @property
     def application(self):
@@ -51,15 +53,14 @@ class Connection(SockJSConnection):
         opcode, rest = payload[0], payload[1:]
         getattr(self, self.OP_MAP[opcode])(*rest)
 
-    def do_auth(self, uid):
-        self.uid = int(uid)
-        self.application.uid_conns[uid] = self
+    def do_auth(self, editor_id):
+        self.uid = self.application.uid_conns and max(self.application.uid_conns.keys()) + 1 or 0
+        self.editor_id = editor_id
+        self.application.uid_conns[self.uid] = self
         self.send(json.dumps([self.OP_AUTH]))
 
     def do_load(self, doc_id):
-        if doc_id not in self.docs:
-            self.docs[doc_id] = OTServer(RedisTextDocumentBackend(self.application.redis, doc_id))
-        doc = self.docs[doc_id]
+        doc = self.get_document(doc_id)
 
         self.doc_ids.add(doc_id)
 
@@ -70,7 +71,7 @@ class Connection(SockJSConnection):
         self.send(json.dumps([self.OP_CONTENT, doc_id, rev, doc.backend.get_clients(), content]))
 
     def do_operation(self, doc_id, rev, raw_op):
-        doc = self.docs[doc_id]
+        doc = self.get_document(doc_id)
         op = doc.receive_operation(self.uid, rev, TextOperation.deserialize(raw_op))
 
         if op is None:
@@ -78,20 +79,11 @@ class Connection(SockJSConnection):
 
         self.send(json.dumps([self.OP_ACK, doc_id]))
 
-        payload = [self.OP_OPERATION, doc_id, op.serialize()]
-
-        for uid in doc.backend.get_clients():
-            if uid not in self.application.uid_conns:
-                doc.backend.remove_client(uid)
-                continue
-            if uid == self.uid:
-                continue
-
-            conn = self.application.uid_conns[uid]
-            conn.send(json.dumps(payload))
+        self.broadcast_to_doc(doc_id,
+                              [self.OP_OPERATION, doc_id, op.serialize()])
 
     def do_cursor(self, doc_id, cursor):
-        doc = self.docs[doc_id]
+        doc = self.get_document(doc_id)
 
         if cursor is None:
             doc.backend.remove_client_cursor(self.uid)
@@ -99,7 +91,17 @@ class Connection(SockJSConnection):
             pos, end = cursor.split(",")
             doc.backend.add_client_cursor(self.uid, int(pos), int(end))
 
-        payload = [self.OP_CURSOR, doc_id, self.uid, cursor]
+        self.broadcast_to_doc(doc_id,
+                              [self.OP_CURSOR, doc_id, self.uid, cursor])
+
+    def do_left(self, doc_id):
+        self.doc_ids.remove(doc_id)
+        self.get_document(doc_id).backend.remove_client(self.uid)
+        self.broadcast_to_doc(doc_id,
+                              [self.OP_LEFT, doc_id, self.uid])
+
+    def broadcast_to_doc(self, doc_id, payload):
+        doc = self.get_document(doc_id)
 
         for uid in doc.backend.get_clients():
             if uid not in self.application.uid_conns:
@@ -107,9 +109,7 @@ class Connection(SockJSConnection):
                 continue
             if uid == self.uid:
                 continue
-
-            conn = self.application.uid_conns[uid]
-            conn.send(json.dumps(payload))
+            self.application.uid_conns[uid].send(json.dumps(payload))
 
     def on_close(self):
         try:
@@ -118,18 +118,12 @@ class Connection(SockJSConnection):
 
             for doc_id in self.doc_ids:
                 payload = [self.OP_LEFT, doc_id, self.uid]
-                doc = self.docs[doc_id]
+                doc = self.get_document(doc_id)
 
-                self.docs[doc_id].backend.remove_client(self.uid)
-                for uid in doc.backend.get_clients():
-                    if uid not in self.application.uid_conns:
-                        doc.backend.remove_client(uid)
-                        continue
-                    if uid == self.uid:
-                        continue
+                self.get_document(doc_id).backend.remove_client(self.uid)
 
-                    conn = self.application.uid_conns[uid]
-                    conn.send(json.dumps(payload))
+                self.broadcast_to_doc(doc_id,
+                                      [self.OP_LEFT, doc_id, self.uid])
         except Exception as e:
             logging.error("Error during on_close:", exc_info=True)
 
