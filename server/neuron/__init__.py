@@ -68,10 +68,10 @@ class Connection(SockJSConnection):
 
         doc.backend.add_client(self.user_id, self.name)
         rev, content = doc.backend.get_latest()
-        doc.backend.update_client_min_rev(self.user_id, rev)
+        doc.backend.add_client(self.user_id, rev)
 
         self.send(json.dumps([self.OP_CONTENT, doc_id, rev,
-                              {k: {"name": v} for k, v in doc.backend.get_clients().iteritems() if k != self.user_id},
+                              {k: {"name": self.application.conns[k].name} for k in doc.backend.get_clients() if k != self.user_id and k in self.application.conns},
                               content]))
 
         self.broadcast_to_doc(doc_id,

@@ -39,11 +39,11 @@ class RedisTextDocumentBackend(object):
         self.doc_id = doc_id
         self.name = name
 
-    def add_client(self, user_id, name, min_rev=-1):
+    def add_client(self, user_id, min_rev=-1):
         """
         Add or update a client in the client hash.
         """
-        self.redis.hset(self.doc_id + ":user_ids", user_id, "{}:{}".format(name, min_rev))
+        self.redis.hset(self.doc_id + ":user_ids", user_id, min_rev)
 
     def remove_client(self, user_id):
         """
@@ -51,22 +51,14 @@ class RedisTextDocumentBackend(object):
         """
         self.redis.hdel(self.doc_id + ":user_ids", user_id)
 
-    def update_client_min_rev(self, user_id, min_rev):
-        # NOTE: this seems like it could race and cause a lost update
-        name, _ = self.redis.hget(self.doc_id + ":user_ids", user_id).split(":")
-        self.add_client(user_id, name, min_rev)
-
     def get_clients(self):
         """
         Get the list of clients.
         """
-        acc = {}
-        for k, v in self.redis.hgetall(self.doc_id + ":user_ids").iteritems():
-            acc[k], _ = v.split(":")
-        return acc
+        return self._get_last_user_ids().keys()
 
     def get_client_cursor(self, user_id):
-        c = self.redis.hget(self.doc_id + ":cursors", user_id).split(":")
+        c = self.redis.hget(self.doc_id + ":cursors", user_id)
         if not c:
             return None
         pos, end = c.split(",")
@@ -95,7 +87,7 @@ class RedisTextDocumentBackend(object):
         self.redis.rpush(self.doc_id + ":pending",
                          self._serialize_wrapped_op(self.name, rev, int(time.time()), operation))
 
-        self.update_client_min_rev(user_id, rev)
+        self.add_client(user_id, rev)
         self._reify_minimal()
 
     def get_operations(self, start, end=None):
@@ -106,8 +98,7 @@ class RedisTextDocumentBackend(object):
 
     def get_last_revision_from_user(self, user_id):
         """Return the revision number of the last operation from a given user."""
-        _, min_rev = self.redis.hget(self.doc_id + ":user_ids", user_id).split(":")
-        return int(min_rev)
+        return int(self.redis.hget(self.doc_id + ":user_ids", user_id))
 
     @staticmethod
     def _deserialize_wrapped_op(x):
@@ -182,11 +173,9 @@ class RedisTextDocumentBackend(object):
         """
         Get the list of last revisions a given UID touched.
         """
-        acc = {}
-        for k, v in self.redis.hgetall(self.doc_id + ":user_ids").iteritems():
-            _, min_rev = v.split(":")
-            acc[k] = int(min_rev)
-        return acc
+        return {k: int(v)
+                for k, v
+                in self.redis.hgetall(self.doc_id + ":user_ids").iteritems()}
 
     def _reify_minimal(self):
         """
