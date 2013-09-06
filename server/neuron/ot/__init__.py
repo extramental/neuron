@@ -2,6 +2,7 @@
 # https://github.com/Operational-Transformation/ot.py
 
 import time
+import logging
 
 from . import text_operation
 
@@ -187,12 +188,18 @@ class RedisTextDocumentBackend(object):
         luids = self._get_last_user_ids()
         new_min_rev = luids and min(luids.values()) or None
 
-        if new_min_rev is None or new_min_rev > min_rev:
+        if new_min_rev > min_rev:
+            pending = self._get_pending()
+
             # yes we can! we want to commit a few pending operations into
             # history now.
-            n = new_min_rev - min_rev
+            if new_min_rev is None:
+                n = len(pending)
+            else:
+                n = new_min_rev - min_rev
 
-            pending = self._get_pending()
+            if n > 1:
+                logging.info("%s needs reification for %d revision(s)", self.doc_id, n)
 
             p = self.redis.pipeline()
 
@@ -213,5 +220,3 @@ class RedisTextDocumentBackend(object):
             p.set(self.doc_id + ":minimal",
                   self._format_minimal(pending_name, pending_rev, pending_ts, content))
             p.execute()
-
-        return new_min_rev
