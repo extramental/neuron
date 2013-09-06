@@ -56,7 +56,7 @@ class Connection(SockJSConnection):
         getattr(self, self.OP_MAP[opcode])(*rest)
 
     def do_auth(self, name):
-        self.user_id = uuid.uuid4().hex
+        self.user_id = uuid.uuid4().hex.encode("utf-8")
         self.name = name
         self.application.conns[self.user_id] = self
         self.send(json.dumps([self.OP_AUTH]))
@@ -71,11 +71,14 @@ class Connection(SockJSConnection):
         doc.backend.add_client(self.user_id, rev)
 
         self.send(json.dumps([self.OP_CONTENT, doc_id, rev,
-                              {k: {"name": self.application.conns[k].name} for k in doc.backend.get_clients() if k != self.user_id and k in self.application.conns},
+                              {k.decode("utf-8"): {"name": self.application.conns[k].name}
+                               for k
+                               in doc.backend.get_clients()
+                               if k != self.user_id and k in self.application.conns},
                               content]))
 
         self.broadcast_to_doc(doc_id,
-                              [self.OP_JOIN, doc_id, self.user_id, self.name])
+                              [self.OP_JOIN, doc_id, self.user_id.decode("utf-8"), self.name])
 
     def do_operation(self, doc_id, rev, raw_op):
         doc = self.get_document(doc_id)
@@ -99,13 +102,13 @@ class Connection(SockJSConnection):
             doc.backend.add_client_cursor(self.user_id, int(pos), int(end))
 
         self.broadcast_to_doc(doc_id,
-                              [self.OP_CURSOR, doc_id, self.user_id, cursor])
+                              [self.OP_CURSOR, doc_id, self.user_id.decode("utf-8"), cursor])
 
     def do_left(self, doc_id):
         self.doc_ids.remove(doc_id)
         self.get_document(doc_id).backend.remove_client(self.user_id)
         self.broadcast_to_doc(doc_id,
-                              [self.OP_LEFT, doc_id, self.user_id])
+                              [self.OP_LEFT, doc_id, self.user_id.decode("utf-8")])
 
     def broadcast_to_doc(self, doc_id, payload):
         doc = self.get_document(doc_id)
@@ -130,7 +133,7 @@ class Connection(SockJSConnection):
                 self.get_document(doc_id).backend.remove_client(self.user_id)
 
                 self.broadcast_to_doc(doc_id,
-                                      [self.OP_LEFT, doc_id, self.user_id])
+                                      [self.OP_LEFT, doc_id, self.user_id.decode("utf-8")])
         except Exception as e:
             logging.error("Error during on_close:", exc_info=True)
 

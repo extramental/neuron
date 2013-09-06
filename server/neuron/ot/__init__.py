@@ -27,8 +27,9 @@ class Server(object):
         Operation = operation.__class__
 
         concurrent_operations = self.backend.get_operations(revision)
+
         for concurrent_operation in concurrent_operations:
-            (operation, _) = Operation.transform(operation, concurrent_operation)
+            operation, _ = Operation.transform(operation, concurrent_operation)
 
         self.backend.save_operation(user_id, operation)
         return operation
@@ -39,6 +40,10 @@ class RedisTextDocumentBackend(object):
         self.redis = redis
         self.doc_id = doc_id
         self.name = name
+
+        # TODO: the rest of this
+        self.cursors = {}
+        self.last_user_revs = {}
 
     def add_client(self, user_id, min_rev=-1):
         """
@@ -51,7 +56,6 @@ class RedisTextDocumentBackend(object):
         Remove a client from the client hash.
         """
         self.redis.hdel(self.doc_id + ":user_ids", user_id)
-        self._reify_minimal()
 
     def get_clients(self):
         """
@@ -74,29 +78,32 @@ class RedisTextDocumentBackend(object):
 
     def get_client_cursors(self):
         acc = {}
-        for k, c in self.redis.hgetall(self.doc_id + ":cursors").iteritems():
+        for k, c in self.redis.hgetall(self.doc_id + ":cursors").items():
             pos, end = c.split(",")
             acc[int(k)] = (int(pos), int(end))
         return acc
 
     def save_operation(self, user_id, operation):
         """Save an operation in the database."""
-        minimal, pending = self._get_minimal_and_pending()
+        _, latest = self.get_latest()
 
-        _, rev, _, _ = pending[-1] if pending else minimal
-        rev += 1
+        p = self.redis.pipeline()
 
-        self.redis.rpush(self.doc_id + ":pending",
-                         self._serialize_wrapped_op(self.name, rev, int(time.time()), operation))
+        p.llen(self.doc_id + ":history")
+        p.rpush(self.doc_id + ":history",
+                self._serialize_wrapped_op(self.name, int(time.time()), operation))
+        p.set(self.doc_id + ":latest", operation(latest))
+        rev, _, _ = p.execute()
 
         self.add_client(user_id, rev)
-        self._reify_minimal()
 
     def get_operations(self, start, end=None):
         """Return operations in a given range."""
-        if end is None:
-            end = float("inf") # XXX: lol
-        return [op for _, rev, _, op in self._get_pending() if start <= rev < end]
+        acc = []
+        for raw_w_op in self.redis.lrange(self.doc_id + ":history", start, end or -1):
+            _, _, op = self._deserialize_wrapped_op(raw_w_op)
+            acc.append(op)
+        return acc
 
     def get_last_revision_from_user(self, user_id):
         """Return the revision number of the last operation from a given user."""
@@ -104,72 +111,23 @@ class RedisTextDocumentBackend(object):
 
     @staticmethod
     def _deserialize_wrapped_op(x):
-        name, rev, ts, op = x.decode("utf-8").split(":", 3)
-        return name, int(rev), int(ts), text_operation.TextOperation.deserialize(op)
+        name, ts, op = x.decode("utf-8").split(":", 2)
+        return name, int(ts), text_operation.TextOperation.deserialize(op)
 
     @staticmethod
-    def _serialize_wrapped_op(name, rev, ts, op):
-        return "{}:{}:{}:{}".format(name, rev, ts, op.serialize())
-
-    @staticmethod
-    def _parse_minimal(raw_minimal):
-        name, rev, ts, content = raw_minimal.split(":", 3)
-        return name, int(rev), int(ts), content
-
-    @staticmethod
-    def _format_minimal(name, rev, ts, content):
-        """
-        Make a minimal revision for use with Redis.
-        """
-        return "{}:{}:{}:{}".format(name, rev, ts, content.encode("utf-8"))
-
-    NEW_DOCUMENT = _format_minimal.__func__(0, 0, 0, "")
-
-    def _get_minimal_and_pending(self):
-        """
-        Get both the minimal text and pending operations, atomically.
-        """
-        p = self.redis.pipeline()
-        p.get(self.doc_id + ":minimal")
-        p.lrange(self.doc_id + ":pending", 0, -1)
-        raw_minimal, raw_pending = p.execute()
-        if raw_minimal is None:
-            raw_minimal = self.NEW_DOCUMENT
-            self.redis.set(self.doc_id + ":minimal", raw_minimal)
-
-        return self._parse_minimal(raw_minimal.decode("utf-8")), [self._deserialize_wrapped_op(raw_op)
-                                                                  for raw_op in raw_pending]
-
-    def _get_minimal(self):
-        """
-        Get the minimal revision of the document. By "minimal", it means the
-        revision that the slowest client is at.
-        """
-        raw_minimal = self.redis.get(self.doc_id + ":minimal")
-        if raw_minimal is None:
-            raw_minimal = self.NEW_DOCUMENT
-            self.redis.set(self.doc_id + ":minimal", raw_minimal)
-        return self._parse_minimal(raw_minimal.decode("utf-8"))
-
-    def _get_pending(self):
-        """
-        Get the list of pending operations for the document.
-        """
-        return [self._deserialize_wrapped_op(raw_op)
-                for raw_op
-                in self.redis.lrange(self.doc_id + ":pending", 0, -1)]
+    def _serialize_wrapped_op(name, ts, op):
+        return "{}:{}:{}".format(name, ts, op.serialize())
 
     def get_latest(self):
         """
         Get the latest revision of the document.
         """
-        minimal, pending = self._get_minimal_and_pending()
+        p = self.redis.pipeline()
+        p.llen(self.doc_id + ":history")
+        p.get(self.doc_id + ":latest")
+        rev_plus_one, latest = p.execute()
 
-        _, rev, _, content = minimal
-        for _, rev, _, op in pending:
-            content = op(content)
-
-        return rev, content
+        return rev_plus_one - 1, (latest or b"").decode("utf-8")
 
     def _get_last_user_ids(self):
         """
@@ -177,47 +135,4 @@ class RedisTextDocumentBackend(object):
         """
         return {k: int(v)
                 for k, v
-                in self.redis.hgetall(self.doc_id + ":user_ids").iteritems()}
-
-    def _reify_minimal(self):
-        """
-        Reify as many pending operations as possible into the minimal text.
-        """
-        # check if we can flush some pending operations
-        _, min_rev, _, content = self._get_minimal()
-        luids = self._get_last_user_ids()
-        new_min_rev = luids and min(luids.values()) or None
-
-        if new_min_rev > min_rev:
-            start_time = time.time()
-            pending = self._get_pending()
-
-            # yes we can! we want to commit a few pending operations into
-            # history now.
-            if new_min_rev is None:
-                n = len(pending)
-            else:
-                n = new_min_rev - min_rev
-
-            p = self.redis.pipeline()
-
-            # generate historical undo operations
-            for pending_name, pending_rev, pending_ts, pending_op in pending[:n]:
-                undo_op = pending_op.invert(content)
-                p.rpush(self.doc_id + ":history",
-                        self._serialize_wrapped_op(pending_name, pending_rev, pending_ts, undo_op))
-                content = pending_op(content)
-
-            # get rid of the pending operations and commit them into history
-            for _ in range(n):
-                # i would use ltrim, but all pending ops might actually need to
-                # be removed -- ltrim retains at least one operation
-                p.lpop(self.doc_id + ":pending")
-
-            # commit a new minimal revision
-            p.set(self.doc_id + ":minimal",
-                  self._format_minimal(pending_name, pending_rev, pending_ts, content))
-            p.execute()
-
-            if n > 1:
-                logging.info("%s reified for %d revision(s) in %.fms", self.doc_id, n, (time.time() - start_time) * 1000)
+                in self.redis.hgetall(self.doc_id + ":user_ids").items()}
