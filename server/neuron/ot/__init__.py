@@ -21,7 +21,7 @@ class Server(object):
         """
 
         last_by_user = self.backend.get_last_revision_from_user(user_id)
-        if last_by_user and last_by_user >= revision:
+        if last_by_user is not None and last_by_user >= revision:
             return
 
         Operation = operation.__class__

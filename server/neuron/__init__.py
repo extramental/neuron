@@ -59,6 +59,7 @@ class Connection(SockJSConnection):
         self.user_id = uuid.uuid4().hex.encode("utf-8")
         self.name = name
         self.application.conns[self.user_id] = self
+        self.application.redis.hset(":users", self.user_id, self.name)
         self.send(json.dumps([self.OP_AUTH]))
 
     def do_load(self, doc_id):
@@ -66,14 +67,21 @@ class Connection(SockJSConnection):
 
         self.doc_ids.add(doc_id)
 
-        doc.backend.add_client(self.user_id, self.name)
+        doc.backend.add_client(self.user_id)
         rev, content = doc.backend.get_latest()
 
+        clients = doc.backend.get_clients()
+
+        p = self.application.redis.pipeline()
+        for c in clients:
+            p.hget(":users", c)
+        names = p.execute()
+
         self.send(json.dumps([self.OP_CONTENT, doc_id, rev,
-                              {k.decode("utf-8"): {"name": self.application.conns[k].name}
-                               for k
-                               in doc.backend.get_clients()
-                               if k != self.user_id and k in self.application.conns},
+                              {k.decode("utf-8"): {"name": names[i].decode("utf-8")}
+                               for i, k
+                               in enumerate(clients)
+                               if k != self.user_id},
                               content]))
 
         self.broadcast_to_doc(doc_id,
@@ -114,7 +122,6 @@ class Connection(SockJSConnection):
 
         for user_id in doc.backend.get_clients():
             if user_id not in self.application.conns:
-                doc.backend.remove_client(user_id)
                 continue
             if user_id == self.user_id:
                 continue
@@ -122,8 +129,12 @@ class Connection(SockJSConnection):
 
     def on_close(self):
         try:
+            del self.application.conns[self.user_id]
+
             if self.user_id is None:
                 return
+
+            self.application.redis.hdel(":users", self.user_id)
 
             for doc_id in self.doc_ids:
                 payload = [self.OP_LEFT, doc_id, self.user_id]
