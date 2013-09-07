@@ -91,10 +91,10 @@ class RedisTextDocumentBackend(object):
 
         self.set_client(user_id, rev)
 
-    def get_operations(self, start, end=None):
+    def get_operations(self, start, end=-1):
         """Return operations in a given range."""
         acc = []
-        for raw_w_op in self.redis.lrange(self.doc_id + ":history", start, end or -1):
+        for raw_w_op in self.redis.lrange(self.doc_id + ":history", start, end):
             _, _, op = self._deserialize_wrapped_op(raw_w_op)
             acc.append(op)
         return acc
