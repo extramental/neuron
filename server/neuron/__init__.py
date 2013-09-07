@@ -44,7 +44,9 @@ class Connection(SockJSConnection):
         self.user_id = None
 
     def get_document(self, doc_id):
-        return OTServer(RedisTextDocumentBackend(self.application.redis, doc_id, self.name))
+        if doc_id not in self.application.docs:
+            self.application.docs[doc_id] = OTServer(RedisTextDocumentBackend(self.application.redis, doc_id, self.name))
+        return self.application.docs[doc_id]
 
     @property
     def application(self):
@@ -66,7 +68,7 @@ class Connection(SockJSConnection):
 
         self.doc_ids.add(doc_id)
 
-        doc.backend.add_client(self.user_id, self.name)
+        doc.backend.add_client(self.user_id)
         rev, content = doc.backend.get_latest()
 
         self.send(json.dumps([self.OP_CONTENT, doc_id, rev,
@@ -141,6 +143,7 @@ class Application(tornado.web.Application):
     def __init__(self, *args, **kwargs):
         tornado.web.Application.__init__(self, *args, **kwargs)
         self.redis = self.settings["redis"]
+        self.docs = {}
         self.conns = {}
 
 

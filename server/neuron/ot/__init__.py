@@ -49,39 +49,31 @@ class RedisTextDocumentBackend(object):
         """
         Add or update a client in the client hash.
         """
-        self.redis.hset(self.doc_id + ":user_ids", user_id, min_rev)
+        self.last_user_revs[user_id] = min_rev
 
     def remove_client(self, user_id):
         """
         Remove a client from the client hash.
         """
-        self.redis.hdel(self.doc_id + ":user_ids", user_id)
+        del self.last_user_revs[user_id]
 
     def get_clients(self):
         """
         Get the list of clients.
         """
-        return self._get_last_user_ids().keys()
+        return self.last_user_revs.keys()
 
     def get_client_cursor(self, user_id):
-        c = self.redis.hget(self.doc_id + ":cursors", user_id)
-        if not c:
-            return None
-        pos, end = c.split(",")
-        return int(pos), int(end)
+        return self.cusrors.get(user_id, None)
 
     def add_client_cursor(self, user_id, pos, end):
-        self.redis.hset(self.doc_id + ":cursors", user_id, "{},{}".format(pos, end))
+        self.cursors[user_id] = (pos, end)
 
     def remove_client_cursor(self, user_id):
-        self.redis.hdel(self.doc_id + ":cursors", user_id)
+        del self.cursors[user_id]
 
     def get_client_cursors(self):
-        acc = {}
-        for k, c in self.redis.hgetall(self.doc_id + ":cursors").items():
-            pos, end = c.split(",")
-            acc[int(k)] = (int(pos), int(end))
-        return acc
+        return self.cursors
 
     def save_operation(self, user_id, operation):
         """Save an operation in the database."""
@@ -107,7 +99,7 @@ class RedisTextDocumentBackend(object):
 
     def get_last_revision_from_user(self, user_id):
         """Return the revision number of the last operation from a given user."""
-        return int(self.redis.hget(self.doc_id + ":user_ids", user_id))
+        return self.last_user_revs[user_id]
 
     @staticmethod
     def _deserialize_wrapped_op(x):
@@ -128,11 +120,3 @@ class RedisTextDocumentBackend(object):
         rev_plus_one, latest = p.execute()
 
         return rev_plus_one - 1, (latest or b"").decode("utf-8")
-
-    def _get_last_user_ids(self):
-        """
-        Get the list of last revisions a given UID touched.
-        """
-        return {k: int(v)
-                for k, v
-                in self.redis.hgetall(self.doc_id + ":user_ids").items()}
