@@ -45,17 +45,18 @@ class RedisTextDocumentBackend(object):
         self.cursors = {}
         self.last_user_revs = {}
 
-    def add_client(self, user_id, min_rev=-1):
+    def set_client(self, user_id, last_rev):
         """
         Add or update a client in the client hash.
         """
-        self.last_user_revs[user_id] = min_rev
+        self.last_user_revs[user_id] = last_rev
 
     def remove_client(self, user_id):
         """
         Remove a client from the client hash.
         """
-        del self.last_user_revs[user_id]
+        if user_id in self.last_user_revs:
+            del self.last_user_revs[user_id]
 
     def get_clients(self):
         """
@@ -66,11 +67,12 @@ class RedisTextDocumentBackend(object):
     def get_client_cursor(self, user_id):
         return self.cusrors.get(user_id, None)
 
-    def add_client_cursor(self, user_id, pos, end):
+    def set_client_cursor(self, user_id, pos, end):
         self.cursors[user_id] = (pos, end)
 
     def remove_client_cursor(self, user_id):
-        del self.cursors[user_id]
+        if user_id in self.cursors:
+            del self.cursors[user_id]
 
     def get_client_cursors(self):
         return self.cursors
@@ -87,7 +89,7 @@ class RedisTextDocumentBackend(object):
         p.set(self.doc_id + ":latest", operation(latest))
         rev, _, _ = p.execute()
 
-        self.add_client(user_id, rev)
+        self.set_client(user_id, rev)
 
     def get_operations(self, start, end=None):
         """Return operations in a given range."""

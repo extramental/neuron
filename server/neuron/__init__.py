@@ -68,7 +68,7 @@ class Connection(SockJSConnection):
 
         self.doc_ids.add(doc_id)
 
-        doc.backend.add_client(self.user_id)
+        doc.backend.set_client(self.user_id, -1)
         rev, content = doc.backend.get_latest()
 
         self.send(json.dumps([self.OP_CONTENT, doc_id, rev,
@@ -100,7 +100,7 @@ class Connection(SockJSConnection):
             doc.backend.remove_client_cursor(self.user_id)
         else:
             pos, end = cursor.split(",")
-            doc.backend.add_client_cursor(self.user_id, int(pos), int(end))
+            doc.backend.set_client_cursor(self.user_id, int(pos), int(end))
 
         self.broadcast_to_doc(doc_id,
                               [self.OP_CURSOR, doc_id, self.user_id.decode("utf-8"), cursor])
