@@ -39,7 +39,7 @@ class Connection(SockJSConnection):
         return self.session.server.application
 
     def on_open(self, request):
-        name = self.application.check_authentication(request)
+        name = self.application.auth_policy.authenticate(request)
 
         if name is None:
             self.send(json.dumps([self.OP_ERROR, "could not authenticate"]))
@@ -57,7 +57,7 @@ class Connection(SockJSConnection):
         getattr(self, self.OP_MAP[opcode])(*rest)
 
     def do_load(self, doc_id):
-        if not self.application.check_authorization(doc_id):
+        if not self.application.auth_policy.authorize(doc_id):
             self.send(json.dumps([self.OP_ERROR, "not permitted"]))
             return
 
