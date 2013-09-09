@@ -22,8 +22,23 @@ define("beaker", default={}, help="beaker settings")
 
 class Application(tornado.web.Application):
     def __init__(self, *args, **kwargs):
-        tornado.web.Application.__init__(self, *args, **kwargs)
-        self.redis = self.settings["redis"]
+        self.rest_router = RESTRouter("/rest")
+
+        self.sockjs_router = SockJSRouter(Connection, "/sockjs")
+
+        # yuck!
+        self.sockjs_router.application = self
+
+        tornado.web.Application.__init__(self,
+                                         self.sockjs_router.urls +
+                                         self.rest_router.urls,
+                                         *args,
+                                         debug=options.debug,
+                                         beaker=options.beaker,
+                                         **kwargs)
+
+        self.redis = redis.StrictRedis(**options.redis)
+
         self.docs = {}
         self.conns = {}
 
@@ -52,21 +67,9 @@ class Application(tornado.web.Application):
         # in Neuron.
         return str(name)
 
-
     def check_authorization(self, doc_id):
         # TODO: yeah.
         return True
-
-
-def make_application():
-    router = SockJSRouter(Connection, "/sockjs")
-    app = Application(RESTRouter("/rest").urls + router.urls,
-                      redis=redis.StrictRedis(**options.redis),
-                      debug=options.debug,
-                      beaker=options.beaker)
-    # urk, yuck!
-    router.application = app
-    return app
 
 
 def main():
@@ -74,7 +77,7 @@ def main():
     if options.config is not None:
         tornado.options.parse_config_file(options.config)
     tornado.options.parse_command_line()
-    application = make_application()
+    application = Application()
 
     application.listen(options.port)
     logging.info("Starting Neuron server on port {}...".format(options.port))
