@@ -1,8 +1,6 @@
 import json
 import uuid
 
-from beaker.session import Session, SessionObject
-
 from sockjs.tornado import SockJSConnection
 
 from .ot import Server as OTServer
@@ -40,35 +38,29 @@ class Connection(SockJSConnection):
     def application(self):
         return self.session.server.application
 
+    def on_open(self, request):
+        name = self.application.check_authentication(request)
+
+        if name is None:
+            self.send(json.dumps([self.OP_ERROR, "could not authenticate"]))
+            self.close()
+            return
+
+        self.name = name
+        self.user_id = uuid.uuid4().hex.encode("utf-8")
+        self.application.conns[self.user_id] = self
+
+
     def on_message(self, msg):
         payload = json.loads(msg)
         opcode, rest = payload[0], payload[1:]
         getattr(self, self.OP_MAP[opcode])(*rest)
 
-    def on_open(self, request):
-        self.beaker_session = SessionObject({
-            "HTTP_COOKIE": str(request.cookies)
-        }, **self.application.settings["beaker"])
-
-        # XXX: Corresponds to Cerebro's concept of user_id (in auth), not the
-        #      Neuron user id. Hereinafter, Cerebro's user_id will be known as
-        #      "name".
-        if "user_id" not in self.beaker_session:
-            self.send(json.dumps([self.OP_ERROR, "not logged in"]))
-            if self.application.settings["debug"]:
-                # XXX: we can just override in debug mode (for now)
-                self.beaker_session["user_id"] = "-1"
-            else:
-                self.close()
-                return
-
-        # The "name" needs to be stringified, as we expect string user "names"
-        # in Neuron.
-        self.name = str(self.beaker_session["user_id"])
-        self.user_id = uuid.uuid4().hex.encode("utf-8")
-        self.application.conns[self.user_id] = self
-
     def do_load(self, doc_id):
+        if not self.application.check_authorization(doc_id):
+            self.send(json.dumps([self.OP_ERROR, "not permitted"]))
+            return
+
         doc = self.get_document(doc_id)
 
         self.doc_ids.add(doc_id)

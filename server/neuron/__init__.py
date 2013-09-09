@@ -6,6 +6,7 @@ import tornado.web
 from tornado.options import define, options
 
 from sockjs.tornado import SockJSRouter
+from beaker.session import Session, SessionObject
 
 from .conn import Connection
 from .rest import RESTRouter
@@ -28,6 +29,33 @@ class Application(tornado.web.Application):
 
     def get_document_backend(self, doc_id):
         return RedisTextDocumentBackend(self.redis, doc_id)
+
+    def check_authentication(self, request):
+        # TODO: yeah.
+        return "1"
+
+        session = SessionObject({
+            "HTTP_COOKIE": str(request.cookies)
+        }, **self.settings["beaker"])
+
+        # XXX: Corresponds to Cerebro's concept of user_id (in auth), not the
+        #      Neuron user id. Hereinafter, Cerebro's user_id will be known as
+        #      "name".
+        name = session.get("user_id", None)
+
+        if name is None:
+            return None
+
+        # TODO: check if the user actually exists in the db
+
+        # The "name" needs to be stringified, as we expect string user "names"
+        # in Neuron.
+        return str(name)
+
+
+    def check_authorization(self, doc_id):
+        # TODO: yeah.
+        return True
 
 
 def make_application():
