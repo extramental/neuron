@@ -12,11 +12,11 @@ from .rest import RESTRouter
 
 from .ot import RedisTextDocumentBackend
 
+define("config", default=None, help="config file to use")
 define("debug", default=False, help="run in debug mode")
 define("port", default=8080, help="port to run on")
-define("redis_host", default="localhost", help="host redis is running on")
-define("redis_port", default=6379, help="port redis is running on")
-define("redis_db", default=0, help="db to use on redis")
+define("redis", default={}, help="redis settings")
+define("beaker", default={}, help="beaker settings")
 
 
 class Application(tornado.web.Application):
@@ -33,20 +33,18 @@ class Application(tornado.web.Application):
 def make_application():
     router = SockJSRouter(Connection, "/sockjs")
     app = Application(RESTRouter("/rest").urls + router.urls,
-                      redis=redis.StrictRedis(host=options.redis_host,
-                                              port=options.redis_port,
-                                              db=options.redis_db),
+                      redis=redis.StrictRedis(**options.redis),
                       debug=options.debug,
-                      beaker={
-                        "type": "cookie",
-                        "validate_key": "foo"
-                      })
+                      beaker=options.beaker)
     # urk, yuck!
     router.application = app
     return app
 
 
 def main():
+    tornado.options.parse_command_line()
+    if options.config is not None:
+        tornado.options.parse_config_file(options.config)
     tornado.options.parse_command_line()
     application = make_application()
 
