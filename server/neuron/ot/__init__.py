@@ -36,12 +36,11 @@ class Server(object):
 
 
 class RedisTextDocumentBackend(object):
-    def __init__(self, redis, doc_id, name):
+    def __init__(self, redis, doc_id, name=None):
         self.redis = redis
         self.doc_id = doc_id
         self.name = name
 
-        # TODO: the rest of this
         self.cursors = {}
         self.last_user_revs = {}
 
@@ -85,19 +84,27 @@ class RedisTextDocumentBackend(object):
 
         p.llen(self.doc_id + ":history")
         p.rpush(self.doc_id + ":history",
-                self._serialize_wrapped_op(self.name, int(time.time()), operation))
+                self._serialize_wrapped_op(self.name,
+                                           int(time.time()),
+                                           operation.invert(latest)))
         p.set(self.doc_id + ":latest", operation(latest))
         rev, _, _ = p.execute()
 
         self.set_client(user_id, rev)
 
-    def get_operations(self, start, end=-1):
+    def get_operations(self, start, end=None):
         """Return operations in a given range."""
+        _, w_ops, latest = self.get_history_operations_to_latest(start)
+
+        w_ops.reverse()
+
         acc = []
-        for raw_w_op in self.redis.lrange(self.doc_id + ":history", start, end):
-            _, _, op = self._deserialize_wrapped_op(raw_w_op)
-            acc.append(op)
-        return acc
+        for _, _, op in w_ops:
+            acc.append(op.invert(latest))
+            latest = op(latest)
+        acc.reverse()
+
+        return acc[:end]
 
     def get_last_revision_from_user(self, user_id):
         """Return the revision number of the last operation from a given user."""
@@ -122,3 +129,20 @@ class RedisTextDocumentBackend(object):
         rev_plus_one, latest = p.execute()
 
         return rev_plus_one - 1, (latest or b"").decode("utf-8")
+
+    def get_history_operations_to_latest(self, start):
+        """
+        Get the latest revision of the document, with all the operations from
+        the start revision.
+        """
+        p = self.redis.pipeline()
+        p.llen(self.doc_id + ":history")
+        p.lrange(self.doc_id + ":history", start, -1)
+        p.get(self.doc_id + ":latest")
+        rev_plus_one, raw_w_ops, latest = p.execute()
+
+        return rev_plus_one - 1, \
+               [self._deserialize_wrapped_op(raw_w_op)
+                for raw_w_op
+                in raw_w_ops], \
+               (latest or b"").decode("utf-8")
