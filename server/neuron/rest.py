@@ -1,6 +1,31 @@
-from tornado.web import RequestHandler
+import Cookie
+
+from beaker.session import Session, SessionObject
+from beaker.util import coerce_session_params
+
+from tornado.web import RequestHandler as _RequestHandler
+from tornado.wsgi import WSGIContainer
 
 from .ot import RedisTextDocumentBackend
+
+
+class RequestHandler(_RequestHandler):
+    def __init__(self, *args, **kwargs):
+        _RequestHandler.__init__(self, *args, **kwargs)
+
+        session_options = coerce_session_params(self.settings["beaker"])
+        self.environ = WSGIContainer.environ(self.request)
+        self.session = SessionObject(self.environ, **session_options)
+
+    def finish(self, *args, **kwargs):
+        self.session.persist()
+
+        # dig into tornado internals (aah!)
+        if not hasattr(self, "_new_cookie"):
+            self._new_cookie = Cookie.SimpleCookie()
+        self._new_cookie.update(self.session.cookie)
+
+        _RequestHandler.finish(self, *args, **kwargs)
 
 
 class DocumentMetaHandler(RequestHandler):
@@ -21,13 +46,15 @@ class DocumentRevisionHandler(RequestHandler):
 
         if doc_rev is None:
             doc_rev, _ = doc.get_latest()
+        else:
+            doc_rev = int(doc_rev)
 
         rev, w_ops, content = doc.get_history_operations_to_latest(doc_rev)
 
-        if rev == -1:
+        if doc_rev > rev:
+            self.set_status(404)
             return self.finish({
-                "latest_rev": -1,
-                "content": ""
+                "error": "revision not found"
             })
 
         name, ts, _ = w_ops[0]
@@ -51,6 +78,6 @@ class RESTRouter(object):
     def urls(self):
         return [
             (self.prefix + r"/docs/(?P<doc_id>[^/]+)/?", DocumentMetaHandler),
-            (self.prefix + r"/docs/(?P<doc_id>[^/]+)/revs/(?P<doc_rev>\d+)?/", DocumentRevisionHandler),
+            (self.prefix + r"/docs/(?P<doc_id>[^/]+)/revs/(?P<doc_rev>\d+)/?", DocumentRevisionHandler),
             (self.prefix + r"/docs/(?P<doc_id>[^/]+)/revs/latest/?", DocumentRevisionHandler)
         ]

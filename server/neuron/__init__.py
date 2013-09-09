@@ -36,7 +36,11 @@ def make_application():
                       redis=redis.StrictRedis(host=options.redis_host,
                                               port=options.redis_port,
                                               db=options.redis_db),
-                      debug=options.debug)
+                      debug=options.debug,
+                      beaker={
+                        "type": "cookie",
+                        "validate_key": "foo"
+                      })
     # urk, yuck!
     router.application = app
     return app

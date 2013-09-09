@@ -21,11 +21,11 @@ def _is_delete(op):
 
 
 def _is_insert(op):
-    return isinstance(op, str)
+    return isinstance(op, unicode)
 
 
 def _op_len(op):
-    if isinstance(op, str):
+    if isinstance(op, unicode):
         return len(op)
     if op < 0:
         return -op
@@ -33,7 +33,7 @@ def _op_len(op):
 
 
 def _shorten(op, by):
-    if isinstance(op, str):
+    if isinstance(op, unicode):
         return op[by:]
     if op < 0:
         return op + by
@@ -73,7 +73,7 @@ class TextOperation(object):
         """
         s = 0
         for op in self:
-            if isinstance(op, str):
+            if isinstance(op, unicode):
                 s += len(op)
             elif op < 0:
                 s += op
@@ -95,7 +95,7 @@ class TextOperation(object):
 
         if len(s) == 0:
             return self
-        if len(self.ops) > 0 and isinstance(self.ops[-1], str):
+        if len(self.ops) > 0 and isinstance(self.ops[-1], unicode):
             self.ops[-1] += s
         elif len(self.ops) > 0 and isinstance(self.ops[-1], int) and self.ops[-1] < 0:
             # It doesn't matter when an operation is applied whether the operation
@@ -103,7 +103,7 @@ class TextOperation(object):
             # Here we enforce that in this case, the insert op always comes first.
             # This makes all operations that have the same effect when applied to
             # a document of the right length equal in respect to the `equals` method.
-            if len(self.ops) > 1 and isinstance(self.ops[-2], str):
+            if len(self.ops) > 1 and isinstance(self.ops[-2], unicode):
                 self.ops[-2] += s
             else:
                 self.ops.append(self.ops[-1])

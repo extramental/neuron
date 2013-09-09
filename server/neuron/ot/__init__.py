@@ -128,7 +128,7 @@ class RedisTextDocumentBackend(object):
         p.get(self.doc_id + ":latest")
         rev_plus_one, latest = p.execute()
 
-        return rev_plus_one - 1, (latest or b"").decode("utf-8")
+        return rev_plus_one - 1, (latest or "").decode("utf-8")
 
     def get_history_operations_to_latest(self, start):
         """

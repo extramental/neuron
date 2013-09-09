@@ -1,3 +1,4 @@
 tornado
 redis
+beaker
 git+https://github.com/mrjoes/sockjs-tornado.git
