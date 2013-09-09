@@ -20,7 +20,7 @@
             var client;
 
             var ops = {
-                AUTH: 0,
+                ERROR: 0,
                 LOAD: 1,
                 CONTENT: 2,
                 OPERATION: 3,
@@ -39,72 +39,73 @@
             }
 
             var OP_MAP = {};
-            OP_MAP[ops.AUTH] = function () {
-                sock.send(JSON.stringify([ops.LOAD, "test_doc"]));
 
-                OP_MAP[ops.CONTENT] = function (id, rev, clients, body) {
-                    cm.setValue(body);
+            OP_MAP[ops.ERROR] = function (msg) {
+                console.error("neuron error:", msg);
+            }
 
-                    var sockAdapter = {
-                        sendOperation: function (rev, op, cursor) {
-                            sock.send(JSON.stringify([ops.OPERATION, id, rev, JSON.stringify(op)]));
-                            sockAdapter.sendCursor(cursor);
-                        },
+            OP_MAP[ops.CONTENT] = function (id, rev, clients, body) {
+                cm.setValue(body);
 
-                        sendCursor: function (cursor) {
-                            if (cursor) {
-                                sock.send(JSON.stringify([ops.CURSOR, id, cursor.position + "," + cursor.selectionEnd]));
-                            } else {
-                                sock.send(JSON.stringify([ops.CURSOR, id, null]));
-                            }
-                        },
+                var sockAdapter = {
+                    sendOperation: function (rev, op, cursor) {
+                        sock.send(JSON.stringify([ops.OPERATION, id, rev, JSON.stringify(op)]));
+                        sockAdapter.sendCursor(cursor);
+                    },
 
-                        registerCallbacks: function (cb) {
-                            OP_MAP[ops.OPERATION] = function (id, rawOp) {
-                                cb.operation(JSON.parse(rawOp));
-                            };
-
-                            OP_MAP[ops.ACK] = function (id) {
-                                cb.ack();
-                            };
-
-                            OP_MAP[ops.CURSOR] = function (id, uid, cursor) {
-                                if (cursor !== null) {
-                                    cursor = cursor.split(",");
-                                    cursor = {
-                                        position: parseInt(cursor[0], 10),
-                                        selectionEnd: parseInt(cursor[1], 10)
-                                    };
-                                }
-                                cb.cursor(uid, cursor);
-                            };
-
-
-                            OP_MAP[ops.LEFT] = function (id, uid) {
-                                cb.client_left(uid);
-                            };
-
-                            OP_MAP[ops.JOIN] = function (id, uid, name) {
-                                cb.set_name(uid, name);
-                            };
-
-                            this.cb = cb;
+                    sendCursor: function (cursor) {
+                        if (cursor) {
+                            sock.send(JSON.stringify([ops.CURSOR, id, cursor.position + "," + cursor.selectionEnd]));
+                        } else {
+                            sock.send(JSON.stringify([ops.CURSOR, id, null]));
                         }
-                    };
+                    },
 
-                    client = new ot.EditorClient(
-                        rev + 1,
-                        clients,
-                        sockAdapter,
-                        new ot.CodeMirrorAdapter(cm)
-                    );
-                    document.body.appendChild(client.clientListEl);
+                    registerCallbacks: function (cb) {
+                        OP_MAP[ops.OPERATION] = function (id, rawOp) {
+                            cb.operation(JSON.parse(rawOp));
+                        };
+
+                        OP_MAP[ops.ACK] = function (id) {
+                            cb.ack();
+                        };
+
+                        OP_MAP[ops.CURSOR] = function (id, uid, cursor) {
+                            if (cursor !== null) {
+                                cursor = cursor.split(",");
+                                cursor = {
+                                    position: parseInt(cursor[0], 10),
+                                    selectionEnd: parseInt(cursor[1], 10)
+                                };
+                            }
+                            cb.cursor(uid, cursor);
+                        };
+
+
+                        OP_MAP[ops.LEFT] = function (id, uid) {
+                            cb.client_left(uid);
+                        };
+
+                        OP_MAP[ops.JOIN] = function (id, uid, name) {
+                            cb.set_name(uid, name);
+                        };
+
+                        this.cb = cb;
+                    }
                 };
+
+                client = new ot.EditorClient(
+                    rev + 1,
+                    clients,
+                    sockAdapter,
+                    new ot.CodeMirrorAdapter(cm)
+                );
+                document.body.appendChild(client.clientListEl);
             };
 
-            var sock = new SockJS("http://localhost:8080/");
+            var sock = new SockJS("http://localhost:8080/sockjs");
             sock.onopen = function () {
-                sock.send(JSON.stringify([ops.AUTH, editorId]));
+                sock.send(JSON.stringify([ops.LOAD, "test_doc"]));
             };
 
             sock.onmessage = function (e) {
@@ -115,6 +116,20 @@
             sock.onclose = function () {
                 console.error("died");
             };
+
+          (function () {
+            var send = sock.send;
+            var queue = [];
+            sock.send = function () {
+              queue.push(arguments);
+              return sock;
+            };
+            setInterval(function () {
+              if (queue.length) {
+                send.apply(sock, queue.shift());
+              }
+            }, 800);
+          })();
         </script>
     </body>
 </html>

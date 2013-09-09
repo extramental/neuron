@@ -1,7 +1,6 @@
 import Cookie
 
 from beaker.session import Session, SessionObject
-from beaker.util import coerce_session_params
 
 from tornado.web import RequestHandler as _RequestHandler
 from tornado.wsgi import WSGIContainer
@@ -13,9 +12,8 @@ class RequestHandler(_RequestHandler):
     def __init__(self, *args, **kwargs):
         _RequestHandler.__init__(self, *args, **kwargs)
 
-        session_options = coerce_session_params(self.settings["beaker"])
         self.environ = WSGIContainer.environ(self.request)
-        self.session = SessionObject(self.environ, **session_options)
+        self.session = SessionObject(self.environ, **self.application.settings["beaker"])
 
     def finish(self, *args, **kwargs):
         self.session.persist()
