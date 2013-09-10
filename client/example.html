@@ -7,7 +7,7 @@
         <textarea id="document" cols="30" rows="10"></textarea>
         <script src="bower_components/sockjs-client/sockjs.min.js"></script>
         <script src="bower_components/lodash/lodash.js"></script>
-        <script src="bower_components/ot/dist/ot.js"></script>
+        <script src="bower_components/ot/dist/ot.min.js"></script>
         <script src="bower_components/codemirror/lib/codemirror.js"></script>
         <link rel="stylesheet" href="bower_components/codemirror/lib/codemirror.css">
         <script>
@@ -103,7 +103,7 @@
                 document.body.appendChild(client.clientListEl);
             };
 
-            var sock = new SockJS("http://localhost:8080/sockjs");
+            var sock = new SockJS("http://localhost:8000/_neuron_sockjs");
             sock.onopen = function () {
                 sock.send(JSON.stringify([ops.LOAD, 1]));
             };

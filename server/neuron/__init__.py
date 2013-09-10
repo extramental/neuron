@@ -46,7 +46,7 @@ def main():
     define("config", default=None, help="config file to use")
     define("debug", default=False, help="run in debug mode", group="application")
     define("auth_policy", default=DummyAuthPolicy, help="auth policy to use", group="application")
-    define("port", default=8080, help="port to run on", group="application")
+    define("port", default=9000, help="port to run on", group="application")
     define("redis", default={}, help="redis settings", group="application")
 
     tornado.options.parse_command_line(final=False)
