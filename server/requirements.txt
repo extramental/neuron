@@ -1,3 +1,0 @@
-tornado
-redis
-git+https://github.com/mrjoes/sockjs-tornado.git
