@@ -19,8 +19,9 @@ setup(name="neuron",
       zip_safe=False,
       test_suite="neuron",
       install_requires=requires,
+      dependency_links=["http://github.com/mrjoes/sockjs-tornado/tarball/master#egg=sockjs-tornado-1.0.0"],
       entry_points="""\
       [console_scripts]
       neuron = neuron:main
-      """,
+      """
       )
