@@ -1,4 +1,7 @@
 class DummyAuthPolicy(object):
+    def __init__(self, application):
+        pass
+
     def authenticate(self, request):
         return "dummy"
 

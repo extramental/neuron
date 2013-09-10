@@ -13,12 +13,11 @@ from .auth import DENY, READER, WRITER
 class Connection(SockJSConnection):
     OP_ERROR = 0
     OP_LOAD = 1
-    OP_CONTENT = 2
-    OP_OPERATION = 3
-    OP_ACK = 4
-    OP_CURSOR = 5
-    OP_LEFT = 6
-    OP_JOIN = 7
+    OP_OPERATION = 2
+    OP_ACK = 3
+    OP_CURSOR = 4
+    OP_LEFT = 5
+    OP_JOIN = 6
 
     OP_MAP = {
         OP_LOAD: "do_load",
@@ -54,6 +53,13 @@ class Connection(SockJSConnection):
         self.conn_id = uuid.uuid4().hex.encode("utf-8")
         self.application.conns[self.conn_id] = self
 
+    def ensure_authorization(self, doc_id):
+        # XXX: a client has to reconnect to acquire new permissions for a doc.
+        #      however, a client can just be disconnected forcibly and
+        #      reconnected to flush their level.
+        if doc_id not in self.loaded_docs:
+            self.loaded_docs[doc_id] = self.application.auth_policy.authorize(doc_id)
+        return self.loaded_docs[doc_id]
 
     def on_message(self, msg):
         payload = json.loads(msg)
@@ -61,23 +67,16 @@ class Connection(SockJSConnection):
         getattr(self, self.OP_MAP[opcode])(*rest)
 
     def do_load(self, doc_id):
-        level = self.application.auth_policy.authorize(doc_id)
-
-        if level == DENY:
+        if self.ensure_authorization(doc_id) == DENY:
             self.send(json.dumps([self.OP_ERROR, "not permitted"]))
             return
 
         doc = self.get_document(doc_id)
 
-        # XXX: a client has to reconnect to acquire new permissions for a doc.
-        #      however, a client can just be disconnected forcibly and
-        #      reconnected to flush their level.
-        self.loaded_docs[doc_id] = level
-
         doc.backend.set_client(self.conn_id, -1)
         rev, content = doc.backend.get_latest()
 
-        self.send(json.dumps([self.OP_CONTENT, doc_id, rev,
+        self.send(json.dumps([self.OP_LOAD, doc_id, rev,
                               {k.decode("utf-8"): {"name": str(self.application.conns[k].user_id)}
                                for k
                                in doc.backend.get_clients()
@@ -88,7 +87,7 @@ class Connection(SockJSConnection):
                               [self.OP_JOIN, doc_id, self.conn_id.decode("utf-8"), str(self.user_id)])
 
     def do_operation(self, doc_id, rev, raw_op):
-        if self.loaded_docs[doc_id] != WRITER:
+        if self.ensure_authorization(doc_id) != WRITER:
             self.send(json.dumps([self.OP_ERROR, "not permitted"]))
             return
 
@@ -104,6 +103,10 @@ class Connection(SockJSConnection):
                               [self.OP_OPERATION, doc_id, op.serialize()])
 
     def do_cursor(self, doc_id, cursor):
+        if self.ensure_authorization(doc_id) != WRITER:
+            self.send(json.dumps([self.OP_ERROR, "not permitted"]))
+            return
+
         doc = self.get_document(doc_id)
 
         if cursor is None:
