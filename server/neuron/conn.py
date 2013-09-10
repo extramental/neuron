@@ -7,6 +7,9 @@ from .ot import Server as OTServer
 from .ot import RedisTextDocumentBackend
 from .ot.text_operation import TextOperation
 
+from .auth import DENY, READER, WRITER
+
+
 class Connection(SockJSConnection):
     OP_ERROR = 0
     OP_LOAD = 1
@@ -26,7 +29,7 @@ class Connection(SockJSConnection):
 
     def __init__(self, *args, **kwargs):
         super(Connection, self).__init__(*args, **kwargs)
-        self.doc_ids = set([])
+        self.loaded_docs = {}
         self.conn_id = None
         self.user_id = None
 
@@ -58,13 +61,18 @@ class Connection(SockJSConnection):
         getattr(self, self.OP_MAP[opcode])(*rest)
 
     def do_load(self, doc_id):
-        if not self.application.auth_policy.authorize(doc_id):
+        level = self.application.auth_policy.authorize(doc_id)
+
+        if level == DENY:
             self.send(json.dumps([self.OP_ERROR, "not permitted"]))
             return
 
         doc = self.get_document(doc_id)
 
-        self.doc_ids.add(doc_id)
+        # XXX: a client has to reconnect to acquire new permissions for a doc.
+        #      however, a client can just be disconnected forcibly and
+        #      reconnected to flush their level.
+        self.loaded_docs[doc_id] = level
 
         doc.backend.set_client(self.conn_id, -1)
         rev, content = doc.backend.get_latest()
@@ -80,6 +88,10 @@ class Connection(SockJSConnection):
                               [self.OP_JOIN, doc_id, self.conn_id.decode("utf-8"), str(self.user_id)])
 
     def do_operation(self, doc_id, rev, raw_op):
+        if self.loaded_docs[doc_id] != WRITER:
+            self.send(json.dumps([self.OP_ERROR, "not permitted"]))
+            return
+
         doc = self.get_document(doc_id)
         op = doc.receive_operation(self.conn_id, rev, TextOperation.deserialize(raw_op))
 
@@ -104,7 +116,7 @@ class Connection(SockJSConnection):
                               [self.OP_CURSOR, doc_id, self.conn_id.decode("utf-8"), cursor])
 
     def do_left(self, doc_id):
-        self.doc_ids.remove(doc_id)
+        del self.loaded_docs[doc_id]
         self.get_document(doc_id).backend.remove_client(self.conn_id)
         self.broadcast_to_doc(doc_id,
                               [self.OP_LEFT, doc_id, self.conn_id.decode("utf-8")])
@@ -125,7 +137,7 @@ class Connection(SockJSConnection):
             if self.conn_id is None:
                 return
 
-            for doc_id in self.doc_ids:
+            for doc_id in self.loaded_docs.keys():
                 payload = [self.OP_LEFT, doc_id, self.conn_id]
                 doc = self.get_document(doc_id)
 

@@ -4,3 +4,8 @@ class DummyAuthPolicy(object):
 
     def authorize(self, doc_id):
         return True
+
+
+DENY = -1
+READER = 0
+WRITER = 1
