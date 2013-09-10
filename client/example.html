@@ -105,7 +105,7 @@
 
             var sock = new SockJS("http://localhost:8080/sockjs");
             sock.onopen = function () {
-                sock.send(JSON.stringify([ops.LOAD, "test_doc"]));
+                sock.send(JSON.stringify([ops.LOAD, 1]));
             };
 
             sock.onmessage = function (e) {

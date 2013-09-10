@@ -13,21 +13,12 @@ class RequestHandler(_RequestHandler):
         _RequestHandler.__init__(self, *args, **kwargs)
 
         self.environ = WSGIContainer.environ(self.request)
-        self.session = SessionObject(self.environ, **self.application.settings["beaker"])
-
-    def finish(self, *args, **kwargs):
-        self.session.persist()
-
-        # dig into tornado internals (aah!)
-        if not hasattr(self, "_new_cookie"):
-            self._new_cookie = Cookie.SimpleCookie()
-        self._new_cookie.update(self.session.cookie)
-
-        _RequestHandler.finish(self, *args, **kwargs)
 
 
 class DocumentMetaHandler(RequestHandler):
     def get(self, doc_id):
+        doc_id = int(doc_id)
+
         doc = self.application.get_document_backend(doc_id)
         rev, content = doc.get_latest()
 
@@ -40,6 +31,8 @@ class DocumentMetaHandler(RequestHandler):
 
 class DocumentRevisionHandler(RequestHandler):
     def get(self, doc_id, doc_rev=None):
+        doc_id = int(doc_id)
+
         doc = self.application.get_document_backend(doc_id)
 
         if doc_rev is None:
@@ -75,7 +68,7 @@ class RESTRouter(object):
     @property
     def urls(self):
         return [
-            (self.prefix + r"/docs/(?P<doc_id>[^/]+)/?", DocumentMetaHandler),
-            (self.prefix + r"/docs/(?P<doc_id>[^/]+)/revs/(?P<doc_rev>\d+)/?", DocumentRevisionHandler),
-            (self.prefix + r"/docs/(?P<doc_id>[^/]+)/revs/latest/?", DocumentRevisionHandler)
+            (self.prefix + r"/docs/(?P<doc_id>\d+)/?", DocumentMetaHandler),
+            (self.prefix + r"/docs/(?P<doc_id>\d+)/revs/(?P<doc_rev>\d+)/?", DocumentRevisionHandler),
+            (self.prefix + r"/docs/(?P<doc_id>\d+)/revs/latest/?", DocumentRevisionHandler)
         ]

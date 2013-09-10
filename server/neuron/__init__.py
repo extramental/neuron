@@ -5,7 +5,6 @@ import tornado.ioloop
 import tornado.web
 
 from sockjs.tornado import SockJSRouter
-from beaker.session import Session, SessionObject
 
 from .conn import Connection
 from .rest import RESTRouter
@@ -31,41 +30,13 @@ class Application(tornado.web.Application):
                                          **kwargs)
 
         self.redis = redis.StrictRedis(**self.settings["redis"])
-        self.auth_policy = self.settings["auth_policy"]()
+        self.auth_policy = self.settings["auth_policy"](self)
 
         self.docs = {}
         self.conns = {}
 
     def get_document_backend(self, doc_id):
         return RedisTextDocumentBackend(self.redis, doc_id)
-
-
-class CerebroAuthPolicy(object):
-    def authenticate(self, request):
-        # TODO: yeah.
-        return "1"
-
-        session = SessionObject({
-            "HTTP_COOKIE": str(request.cookies)
-        }, **self.settings["beaker"])
-
-        # XXX: Corresponds to Cerebro's concept of user_id (in auth), not the
-        #      Neuron user id. Hereinafter, Cerebro's user_id will be known as
-        #      "name".
-        name = session.get("user_id", None)
-
-        if name is None:
-            return None
-
-        # TODO: check if the user actually exists in the db
-
-        # The "name" needs to be stringified, as we expect string user "names"
-        # in Neuron.
-        return str(name)
-
-    def authorize(self, doc_id):
-        # TODO: yeah.
-        return True
 
 
 def main():
@@ -77,11 +48,10 @@ def main():
     define("auth_policy", default=DummyAuthPolicy, help="auth policy to use", group="application")
     define("port", default=8080, help="port to run on", group="application")
     define("redis", default={}, help="redis settings", group="application")
-    define("beaker", default={}, help="beaker settings", group="application")
 
-    tornado.options.parse_command_line()
+    tornado.options.parse_command_line(final=False)
     if options.config is not None:
-        tornado.options.parse_config_file(options.config)
+        tornado.options.parse_config_file(options.config, final=False)
     tornado.options.parse_command_line()
     application = Application(**options.group_dict("application"))
 
