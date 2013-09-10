@@ -86,12 +86,21 @@ class Connection(SockJSConnection):
         self.broadcast_to_doc(doc_id,
                               [self.OP_JOIN, doc_id, self.conn_id.decode("utf-8"), str(self.user_id)])
 
-    def do_operation(self, doc_id, rev, raw_op):
+    def process_raw_cursor(self, doc, raw_cursor):
+        if raw_cursor is None:
+            doc.backend.remove_client_cursor(self.conn_id)
+        else:
+            pos, end = raw_cursor.split(",")
+            doc.backend.set_client_cursor(self.conn_id, int(pos), int(end))
+
+    def do_operation(self, doc_id, rev, raw_op, raw_cursor):
         if self.ensure_authorization(doc_id) != WRITER:
             self.send(json.dumps([self.OP_ERROR, "not permitted"]))
             return
 
         doc = self.get_document(doc_id)
+        self.process_raw_cursor(doc, raw_cursor)
+
         op = doc.receive_operation(self.conn_id, rev, TextOperation.deserialize(raw_op))
 
         if op is None:
@@ -100,23 +109,18 @@ class Connection(SockJSConnection):
         self.send(json.dumps([self.OP_ACK, doc_id]))
 
         self.broadcast_to_doc(doc_id,
-                              [self.OP_OPERATION, doc_id, op.serialize()])
+                              [self.OP_OPERATION, doc_id, self.conn_id.decode("utf-8"), op.serialize(), raw_cursor])
 
-    def do_cursor(self, doc_id, cursor):
+    def do_cursor(self, doc_id, raw_cursor):
         if self.ensure_authorization(doc_id) != WRITER:
             self.send(json.dumps([self.OP_ERROR, "not permitted"]))
             return
 
         doc = self.get_document(doc_id)
-
-        if cursor is None:
-            doc.backend.remove_client_cursor(self.conn_id)
-        else:
-            pos, end = cursor.split(",")
-            doc.backend.set_client_cursor(self.conn_id, int(pos), int(end))
+        self.process_raw_cursor(doc, raw_cursor)
 
         self.broadcast_to_doc(doc_id,
-                              [self.OP_CURSOR, doc_id, self.conn_id.decode("utf-8"), cursor])
+                              [self.OP_CURSOR, doc_id, self.conn_id.decode("utf-8"), raw_cursor])
 
     def do_left(self, doc_id):
         del self.loaded_docs[doc_id]
