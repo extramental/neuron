@@ -86,8 +86,9 @@ class RedisTextDocumentBackend(object):
         p.rpush(str(self.doc_id) + ":history",
                 self._serialize_wrapped_op(self.name,
                                            int(time.time()),
-                                           operation.invert(latest)))
-        p.set(str(self.doc_id) + ":latest", operation(latest))
+                                           operation.invert(latest(u""))))
+        p.set(str(self.doc_id) + ":latest",
+              text_operation.TextOperation.serialize(latest.compose(operation)))
         rev, _, _ = p.execute()
 
         self.set_client(conn_id, rev)
@@ -100,8 +101,8 @@ class RedisTextDocumentBackend(object):
 
         acc = []
         for _, _, op in w_ops:
-            acc.append(op.invert(latest))
-            latest = op(latest)
+            acc.append(op.invert(latest(u"")))
+            latest = latest.compose(op)
         acc.reverse()
 
         return acc[:end]
@@ -128,7 +129,8 @@ class RedisTextDocumentBackend(object):
         p.get(str(self.doc_id) + ":latest")
         rev_plus_one, latest = p.execute()
 
-        return rev_plus_one - 1, (latest or "").decode("utf-8")
+        return rev_plus_one - 1, \
+               text_operation.TextOperation.deserialize(latest or b"[]")
 
     def get_history_operations_to_latest(self, start):
         """
@@ -145,4 +147,4 @@ class RedisTextDocumentBackend(object):
                [self._deserialize_wrapped_op(raw_w_op)
                 for raw_w_op
                 in raw_w_ops], \
-               (latest or b"").decode("utf-8")
+               text_operation.TextOperation.deserialize(latest or b"[]")

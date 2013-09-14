@@ -74,14 +74,14 @@ class Connection(SockJSConnection):
         doc = self.get_document(doc_id)
 
         doc.backend.set_client(self.conn_id, -1)
-        rev, content = doc.backend.get_latest()
+        rev, latest = doc.backend.get_latest()
 
         self.send(json.dumps([self.OP_LOAD, doc_id, rev,
                               {k.decode("utf-8"): {"name": str(self.application.conns[k].user_id)}
                                for k
                                in doc.backend.get_clients()
                                if k != self.conn_id and k in self.application.conns},
-                              content]))
+                              latest.serialize()]))
 
         self.broadcast_to_doc(doc_id,
                               [self.OP_JOIN, doc_id, self.conn_id.decode("utf-8"), str(self.user_id)])
